@@ -29,6 +29,10 @@
 build/
 DerivedData/
 
+# Release artifacts (signed & notarized locally)
+InterviewTutor-*-macOS.zip
+*.zip
+
 ####
 # Xcode 4 - Deprecated classes
 #

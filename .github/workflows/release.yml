@@ -1,3 +1,10 @@
+# macOS 26 + Xcode 26 이상이 필요합니다.
+# GitHub-hosted runner(macos-15 등)에서는 빌드·테스트 모두 불가하므로
+# self-hosted runner(macOS 26)에서만 실행하세요.
+#
+# Runner 라벨 예시: self-hosted, macOS, macos-26
+# 등록: GitHub Repo → Settings → Actions → Runners → New self-hosted runner
+
 name: Release
 
 on:
@@ -10,6 +17,11 @@ on:
         description: "Release version (e.g. 1.0.0)"
         required: true
         type: string
+      skip_tests:
+        description: "Skip unit/UI tests (not recommended)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -22,24 +34,38 @@ env:
 jobs:
   test:
     name: Test
-    runs-on: macos-15
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
+    runs-on: [self-hosted, macOS, macos-26]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Show toolchain
+      - name: Verify runner environment
         run: |
+          set -euo pipefail
+          XCODE_APP_PATH="${{ vars.XCODE_APP_PATH }}"
+          if [[ -z "$XCODE_APP_PATH" ]]; then
+            XCODE_APP_PATH="/Applications/Xcode.app"
+          fi
+          sudo xcode-select -s "${XCODE_APP_PATH}/Contents/Developer"
           xcodebuild -version
           sw_vers
 
+          MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+          if [[ "$MACOS_MAJOR" -lt 26 ]]; then
+            echo "This project requires macOS 26+. Runner: $(sw_vers -productVersion)" >&2
+            exit 1
+          fi
+
+          XCODE_MAJOR=$(xcodebuild -version | head -n1 | grep -oE '[0-9]+' | head -n1)
+          if [[ "$XCODE_MAJOR" -lt 26 ]]; then
+            echo "This project requires Xcode 26+. Found: $(xcodebuild -version | head -n1)" >&2
+            exit 1
+          fi
+
       - name: Run unit tests
         run: |
-          set -o pipefail
+          set -euo pipefail
           xcodebuild test \
             -project InterviewTutor.xcodeproj \
             -scheme "$SCHEME" \
@@ -49,7 +75,7 @@ jobs:
 
       - name: Run UI tests
         run: |
-          set -o pipefail
+          set -euo pipefail
           xcodebuild test \
             -project InterviewTutor.xcodeproj \
             -scheme "$SCHEME" \
@@ -76,7 +102,8 @@ jobs:
   release:
     name: Build, Sign, Notarize & Publish
     needs: test
-    runs-on: macos-15
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: [self-hosted, macOS, macos-26]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,10 +124,22 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact=${APP_NAME}-${VERSION}-macOS.zip" >> "$GITHUB_OUTPUT"
 
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Verify runner environment
+        run: |
+          set -euo pipefail
+          XCODE_APP_PATH="${{ vars.XCODE_APP_PATH }}"
+          if [[ -z "$XCODE_APP_PATH" ]]; then
+            XCODE_APP_PATH="/Applications/Xcode.app"
+          fi
+          sudo xcode-select -s "${XCODE_APP_PATH}/Contents/Developer"
+          xcodebuild -version
+          sw_vers
+
+          MACOS_MAJOR=$(sw_vers -productVersion | cut -d. -f1)
+          if [[ "$MACOS_MAJOR" -lt 26 ]]; then
+            echo "This project requires macOS 26+. Runner: $(sw_vers -productVersion)" >&2
+            exit 1
+          fi
 
       - name: Import Developer ID certificate
         env:

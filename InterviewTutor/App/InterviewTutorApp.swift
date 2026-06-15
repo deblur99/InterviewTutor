@@ -1,10 +1,3 @@
-//
-//  InterviewTutorApp.swift
-//  InterviewTutor
-//
-//  Created by 한현민 on 6/15/26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,7 +5,10 @@ import SwiftData
 struct InterviewTutorApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            CandidateProfile.self,
+            InterviewSession.self,
+            QuestionRecord.self,
+            CachedQuestion.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -25,8 +21,9 @@ struct InterviewTutorApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            HomeView()
         }
         .modelContainer(sharedModelContainer)
+        .defaultSize(width: 1100, height: 750)
     }
 }

@@ -214,16 +214,33 @@ jobs:
       - name: Re-create ZIP after staple
         run: |
           ditto -c -k --keepParent "$APP_PATH" "${{ steps.version.outputs.artifact }}"
+          ls -lh "${{ steps.version.outputs.artifact }}"
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: ${{ steps.version.outputs.tag }}
-          files: ${{ steps.version.outputs.artifact }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          ARTIFACT="${{ steps.version.outputs.artifact }}"
+
+          if [[ ! -f "$ARTIFACT" ]]; then
+            echo "Release artifact not found: $ARTIFACT" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists. Uploading artifact with --clobber..."
+            gh release upload "$TAG" "$ARTIFACT" --clobber
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" "$ARTIFACT" \
+              --title "$TAG" \
+              --generate-notes
+          fi
+
+          echo "Release assets:"
+          gh release view "$TAG" --json assets --jq '.assets[].name'
 
       - name: Clean up keychain
         if: always()

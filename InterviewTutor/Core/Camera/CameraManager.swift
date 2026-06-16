@@ -26,6 +26,8 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var audioOutput: AVCaptureAudioDataOutput?
     private nonisolated(unsafe) var previewLayer: AVCaptureVideoPreviewLayer?
     private nonisolated(unsafe) var recorder: VideoRecorder?
+    private nonisolated(unsafe) var videoSampleHandler: (@Sendable (CMSampleBuffer) -> Void)?
+    private nonisolated(unsafe) var audioSampleHandler: (@Sendable (CMSampleBuffer) -> Void)?
 
     private var isConfigured = false
 
@@ -109,6 +111,16 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
         }
     }
 
+    func setSampleHandlers(
+        onVideo: (@Sendable (CMSampleBuffer) -> Void)? = nil,
+        onAudio: (@Sendable (CMSampleBuffer) -> Void)? = nil
+    ) async {
+        await QueueConfined.run(on: queue) {
+            self.videoSampleHandler = onVideo
+            self.audioSampleHandler = onAudio
+        }
+    }
+
     private func configureOnQueue() throws {
         guard !isConfigured else { return }
 
@@ -162,5 +174,11 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapture
         from connection: AVCaptureConnection
     ) {
         recorder?.append(sampleBuffer: sampleBuffer, from: output)
+
+        if output is AVCaptureVideoDataOutput {
+            videoSampleHandler?(sampleBuffer)
+        } else if output is AVCaptureAudioDataOutput {
+            audioSampleHandler?(sampleBuffer)
+        }
     }
 }

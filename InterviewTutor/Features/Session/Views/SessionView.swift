@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -72,8 +73,26 @@ struct SessionView: View {
                     .padding()
             }
 
-            phaseIndicator
-                .padding()
+            VStack(spacing: 8) {
+                if viewModel.phase.isAnsweringPhase {
+                    LiveCoachStatusBar(
+                        fillerCount: viewModel.coachMonitor.liveFillerCount,
+                        keywordCoveragePercent: viewModel.coachMonitor.keywordCoveragePercent,
+                        gazePercent: viewModel.coachMonitor.gazePercent
+                    )
+                }
+
+                if let hint = viewModel.activeCoachHint {
+                    CoachHintOverlay(hint: hint)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+
+            VStack {
+                phaseIndicator
+                    .padding()
+                Spacer()
+            }
         }
     }
 
@@ -92,6 +111,8 @@ struct SessionView: View {
 
             timerSection
 
+            coachControls
+
             InWindowPrompterView(
                 keywords: viewModel.currentKeywords,
                 showAnswerHints: viewModel.stage == .beginner
@@ -108,6 +129,37 @@ struct SessionView: View {
             }
         }
         .padding(20)
+        .onChange(of: viewModel.hudState) { _, _ in
+            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
+        }
+        .onChange(of: viewModel.coachMonitor.liveFillerCount) { _, _ in
+            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
+        }
+        .onChange(of: viewModel.coachMonitor.keywordCoveragePercent) { _, _ in
+            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
+        }
+        .onChange(of: viewModel.coachMonitor.gazePercent) { _, _ in
+            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
+        }
+    }
+
+    private var coachControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("실시간 코치", systemImage: "person.fill.questionmark")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            Toggle("코치 힌트", isOn: $viewModel.isCoachEnabled)
+                .toggleStyle(.switch)
+
+            if viewModel.stage == .beginner {
+                Toggle("HUD 프롬프터", isOn: $viewModel.isHUDEnabled)
+                    .toggleStyle(.switch)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder

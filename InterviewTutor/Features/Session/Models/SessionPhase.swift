@@ -9,6 +9,13 @@ enum SessionPhase: Equatable {
     case closing
     case analyzing
     case postSession
+
+    var isAnsweringPhase: Bool {
+        switch self {
+        case .selfIntro, .answering, .closing: true
+        default: false
+        }
+    }
 }
 
 enum SessionTimerState: Equatable {

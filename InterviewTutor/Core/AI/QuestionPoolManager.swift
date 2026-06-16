@@ -55,19 +55,32 @@ final class QuestionPoolManager {
     func prepareSessionQuestions(
         profile: CandidateProfile,
         stage: SessionStage = .beginner,
+        expertConfiguration: ExpertSessionConfiguration? = nil,
         context: ModelContext
     ) async -> SessionQuestionSet {
         invalidatePoolIfNeeded(profile: profile, context: context)
         purgeInvalidCachedQuestions(profile: profile, context: context)
 
-        let preset = stage.preset
         let fingerprint = ProfileFingerprint.make(for: profile)
 
         switch stage {
         case .beginner:
+            let preset = stage.preset
             return await prepareBeginnerSession(profile: profile, preset: preset, fingerprint: fingerprint, context: context)
-        case .skilled, .expert:
+        case .skilled:
+            let preset = stage.preset
             return await prepareSkilledSession(profile: profile, preset: preset, stage: stage, fingerprint: fingerprint, context: context)
+        case .expert:
+            let config = (expertConfiguration ?? profile.expertSessionConfiguration)
+                .biased(for: WeakTopicAnalyzer.weakCategories(from: profile))
+            return await prepareExpertSession(
+                profile: profile,
+                configuration: config,
+                fingerprint: fingerprint,
+                context: context
+            )
+        case .freePractice:
+            return SessionQuestionSet(questions: [], reservedDocumentQuestionIDs: [])
         }
     }
 
@@ -178,6 +191,96 @@ final class QuestionPoolManager {
         return SessionQuestionSet(questions: fullSet, reservedDocumentQuestionIDs: reservedIDs)
     }
 
+    // MARK: - Expert
+
+    private func prepareExpertSession(
+        profile: CandidateProfile,
+        configuration: ExpertSessionConfiguration,
+        fingerprint: String,
+        context: ModelContext
+    ) async -> SessionQuestionSet {
+        let stage = SessionStage.expert
+
+        let document = await selectOrGenerate(
+            category: .documentBased,
+            count: configuration.documentQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generateDocumentQuestions(for: profile, count: count)
+        }
+
+        let technical = await selectOrGenerate(
+            category: .technical,
+            count: configuration.technicalQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generateTechnicalQuestions(for: profile, count: count)
+        }
+
+        let behavioral = await selectOrGenerate(
+            category: .behavioral,
+            count: configuration.behavioralQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generateBehavioralQuestions(for: profile, count: count)
+        }
+
+        let company = await selectOrGenerate(
+            category: .companyFit,
+            count: configuration.companyQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generateCompanyQuestions(for: profile, count: count)
+        }
+
+        let pressure = await selectOrGenerate(
+            category: .pressure,
+            count: configuration.pressureQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generatePressureQuestions(for: profile, count: count)
+        }
+
+        let comprehensive = await selectOrGenerate(
+            category: .comprehensive,
+            count: configuration.comprehensiveQuestionCount,
+            profile: profile,
+            stage: stage,
+            fingerprint: fingerprint,
+            context: context
+        ) { count in
+            await questionGenerator.generateComprehensiveQuestions(for: profile, count: count)
+        }
+
+        let reservedIDs = document.map(\.questionID)
+        let fullSet = questionGenerator.buildExpertQuestionSet(
+            documentQuestions: document.map { $0.toGeneratedQuestion() },
+            technicalQuestions: technical.map { $0.toGeneratedQuestion() },
+            behavioralQuestions: behavioral.map { $0.toGeneratedQuestion() },
+            companyQuestions: company.map { $0.toGeneratedQuestion() },
+            pressureQuestions: pressure.map { $0.toGeneratedQuestion() },
+            comprehensiveQuestions: comprehensive.map { $0.toGeneratedQuestion() },
+            configuration: configuration
+        )
+
+        return SessionQuestionSet(questions: fullSet, reservedDocumentQuestionIDs: reservedIDs)
+    }
+
     private func selectOrGenerate(
         category: QuestionCategory,
         count: Int,
@@ -215,7 +318,7 @@ final class QuestionPoolManager {
         switch stage {
         case .beginner:
             return await questionGenerator.generateDocumentQuestions(for: profile, count: count)
-        case .skilled, .expert:
+        case .skilled:
             let documentCount = max(1, count / 2)
             let behavioralCount = max(1, count / 3)
             let companyCount = max(0, count - documentCount - behavioralCount)
@@ -227,6 +330,18 @@ final class QuestionPoolManager {
                 result.append(contentsOf: await questionGenerator.generateCompanyQuestions(for: profile, count: companyCount))
             }
             return result
+        case .expert:
+            let perCategory = max(1, count / QuestionCategory.poolCategories.count)
+            var result: [GeneratedQuestion] = []
+            result.append(contentsOf: await questionGenerator.generateDocumentQuestions(for: profile, count: perCategory))
+            result.append(contentsOf: await questionGenerator.generateTechnicalQuestions(for: profile, count: perCategory))
+            result.append(contentsOf: await questionGenerator.generateBehavioralQuestions(for: profile, count: perCategory))
+            result.append(contentsOf: await questionGenerator.generateCompanyQuestions(for: profile, count: perCategory))
+            result.append(contentsOf: await questionGenerator.generatePressureQuestions(for: profile, count: perCategory))
+            result.append(contentsOf: await questionGenerator.generateComprehensiveQuestions(for: profile, count: max(1, count - perCategory * 5)))
+            return Array(result.prefix(count))
+        case .freePractice:
+            return []
         }
     }
 

@@ -4,6 +4,7 @@ enum SessionStage: String, Codable, CaseIterable, Identifiable {
     case beginner
     case skilled
     case expert
+    case freePractice
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum SessionStage: String, Codable, CaseIterable, Identifiable {
         case .beginner: "갓 연습"
         case .skilled: "숙련"
         case .expert: "전문"
+        case .freePractice: "자유 연습"
         }
     }
 
@@ -20,6 +22,7 @@ enum SessionStage: String, Codable, CaseIterable, Identifiable {
         case .beginner: "서류 기반 질문 + 예상 답변 프롬프트"
         case .skilled: "꼬리질문, 인성, 회사 관련 질문"
         case .expert: "모든 범위의 질문 (실전 모드)"
+        case .freePractice: "원하는 항목만 골라 집중 연습"
         }
     }
 
@@ -29,9 +32,13 @@ enum SessionStage: String, Codable, CaseIterable, Identifiable {
 
     var isAvailable: Bool {
         switch self {
-        case .beginner, .skilled: true
-        case .expert: false
+        case .beginner, .skilled, .expert: true
+        case .freePractice: false
         }
+    }
+
+    var isStructuredStage: Bool {
+        self != .freePractice
     }
 
     var preset: SessionStagePreset {

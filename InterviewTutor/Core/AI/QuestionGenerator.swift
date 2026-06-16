@@ -61,8 +61,61 @@ final class QuestionGenerator {
         switch stage {
         case .beginner:
             return buildBeginnerQuestionSet(documentQuestions: documentQuestions)
-        case .skilled, .expert:
+        case .skilled, .expert, .freePractice:
             return documentQuestions
+        }
+    }
+
+    func selfIntroQuestion() -> GeneratedQuestion {
+        GeneratedQuestion(
+            questionText: "1분 이내로 자기소개를 해 주세요.",
+            promptKeywords: "이름, 경력, 지원동기, 강점",
+            recommendedSeconds: 60,
+            category: .selfIntro
+        )
+    }
+
+    func closingQuestion() -> GeneratedQuestion {
+        GeneratedQuestion(
+            questionText: "마지막으로 하고 싶은 말씀이 있으시면 해 주세요.",
+            promptKeywords: "감사, 열정, 회사 관심",
+            recommendedSeconds: 60,
+            category: .closing
+        )
+    }
+
+    func reverseQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        var templates = [
+            "마지막으로 저희 회사나 직무에 대해 궁금한 점이 있으시면 질문해 주세요.",
+            "\(profile.company)의 팀 문화나 성장 기회에 대해 알고 싶은 점이 있으신가요?",
+            "이 직무를 맡게 되었을 때 가장 먼저 확인하고 싶은 것이 있다면 무엇인가요?",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "회사, 직무, 팀, 성장, 문화",
+                recommendedSeconds: 60,
+                category: .reverseQuestion
+            )
+        }
+    }
+
+    func careerChangeReasonQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "현재 직장을 떠나 이직을 결심하게 된 가장 큰 이유를 설명해 주세요.",
+            "\(profile.company)로 이직하려는 이유와 현재 직장 대비 기대하는 점을 말씀해 주세요.",
+            "이직 과정에서 가장 중요하게 고려한 기준은 무엇이며, 왜 그렇게 판단했는지 설명해 주세요.",
+            "이번 이직이 본인의 커리어 목표와 어떻게 연결되는지 말씀해 주세요.",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "이직 동기, 커리어 목표, 성장, 기여",
+                recommendedSeconds: 75,
+                category: .behavioral
+            )
         }
     }
 
@@ -164,6 +217,118 @@ final class QuestionGenerator {
             return generated
         }
         return companyFallbackQuestions(for: profile, count: count)
+    }
+
+    func generateTechnicalQuestions(for profile: CandidateProfile, count: Int) async -> [GeneratedQuestion] {
+        if case .available = model.availability,
+           let generated = await generateTechnicalWithFoundationModels(profile: profile, count: count) {
+            return generated
+        }
+        return technicalFallbackQuestions(for: profile, count: count)
+    }
+
+    func generatePressureQuestions(for profile: CandidateProfile, count: Int) async -> [GeneratedQuestion] {
+        if case .available = model.availability,
+           let generated = await generatePressureWithFoundationModels(profile: profile, count: count) {
+            return generated
+        }
+        return pressureFallbackQuestions(for: profile, count: count)
+    }
+
+    func generateComprehensiveQuestions(for profile: CandidateProfile, count: Int) async -> [GeneratedQuestion] {
+        if case .available = model.availability,
+           let generated = await generateComprehensiveWithFoundationModels(profile: profile, count: count) {
+            return generated
+        }
+        return comprehensiveFallbackQuestions(for: profile, count: count)
+    }
+
+    func buildExpertQuestionSet(
+        documentQuestions: [GeneratedQuestion],
+        technicalQuestions: [GeneratedQuestion],
+        behavioralQuestions: [GeneratedQuestion],
+        companyQuestions: [GeneratedQuestion],
+        pressureQuestions: [GeneratedQuestion],
+        comprehensiveQuestions: [GeneratedQuestion],
+        configuration: ExpertSessionConfiguration
+    ) -> [GeneratedQuestion] {
+        var result: [GeneratedQuestion] = []
+
+        result.append(GeneratedQuestion(
+            questionText: "1분 이내로 자기소개를 해 주세요.",
+            promptKeywords: "이름, 경력, 지원동기, 강점",
+            recommendedSeconds: configuration.adjustedSeconds(60, category: .selfIntro),
+            category: .selfIntro
+        ))
+
+        result.append(contentsOf: documentQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds($0.recommendedSeconds, category: .documentBased),
+                category: .documentBased
+            )
+        })
+
+        result.append(contentsOf: technicalQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds($0.recommendedSeconds, category: .technical),
+                category: .technical
+            )
+        })
+
+        result.append(contentsOf: behavioralQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds(max($0.recommendedSeconds, 75), category: .behavioral),
+                category: .behavioral
+            )
+        })
+
+        result.append(contentsOf: companyQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds($0.recommendedSeconds, category: .companyFit),
+                category: .companyFit
+            )
+        })
+
+        result.append(contentsOf: pressureQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds(40, category: .pressure),
+                category: .pressure
+            )
+        })
+
+        result.append(contentsOf: comprehensiveQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: configuration.adjustedSeconds(90, category: .comprehensive),
+                category: .comprehensive
+            )
+        })
+
+        result.append(GeneratedQuestion(
+            questionText: "마지막으로 하고 싶은 말씀이 있으시면 해 주세요.",
+            promptKeywords: "감사, 열정, 회사 관심",
+            recommendedSeconds: configuration.adjustedSeconds(60, category: .closing),
+            category: .closing
+        ))
+
+        return result
     }
 
     private func generateWithFoundationModels(
@@ -407,6 +572,157 @@ final class QuestionGenerator {
                 promptKeywords: "회사, 직무, 기여, 동기",
                 recommendedSeconds: 60,
                 category: .companyFit
+            )
+        }
+    }
+
+    private func generateTechnicalWithFoundationModels(
+        profile: CandidateProfile,
+        count: Int
+    ) async -> [GeneratedQuestion]? {
+        do {
+            let session = LanguageModelSession(instructions: """
+            직무·이력서 기반 기술·실무 면접 질문을 생성합니다.
+            구현 경험, 아키텍처, 트레이드오프, 문제 해결 과정을 묻습니다. 이론·정의만 묻는 질문은 금지합니다.
+            """)
+
+            let prompt = """
+            [회사] \(profile.company)
+            [직무] \(profile.role)
+            [이력서]
+            \(profile.resumeText.prefix(2000))
+            [채용공고]
+            \(profile.jobDescription.prefix(1500))
+
+            기술·실무 질문 \(count)개를 생성하세요.
+            """
+
+            let response = try await session.respond(to: prompt, generating: GeneratedBehavioralQuestionSet.self)
+            let questions = response.content.questions.compactMap { item -> GeneratedQuestion? in
+                guard InterviewQuestionValidator.isValidQuestionText(item.questionText) else { return nil }
+                return GeneratedQuestion(
+                    questionText: item.questionText,
+                    promptKeywords: item.promptKeywords.isEmpty ? "기술, 설계, 구현, 트레이드오프" : item.promptKeywords,
+                    recommendedSeconds: min(max(item.recommendedSeconds, 60), 90),
+                    category: .technical
+                )
+            }
+            return questions.count >= count ? Array(questions.prefix(count)) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func technicalFallbackQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "\(profile.role) 직무에서 가장 자신 있는 기술 스택과 실제 프로젝트 적용 사례를 설명해 주세요.",
+            "기술적 의사결정 시 트레이드오프를 어떻게 분석하고 선택했는지 사례를 들어 말씀해 주세요.",
+            "성능·품질·일정이 충돌했을 때 어떤 기준으로 우선순위를 정했는지 설명해 주세요.",
+            "최근 해결한 기술적 난제와 해결 과정을 단계별로 설명해 주세요.",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "기술, 설계, 구현, 트레이드오프",
+                recommendedSeconds: 75,
+                category: .technical
+            )
+        }
+    }
+
+    private func generatePressureWithFoundationModels(
+        profile: CandidateProfile,
+        count: Int
+    ) async -> [GeneratedQuestion]? {
+        do {
+            let session = LanguageModelSession(instructions: """
+            실전 면접의 압박·꼬리질문을 생성합니다. 짧고 직접적이며, 답변의 허점을 파고드는 질문을 만듭니다.
+            무례하거나 비하하는 표현은 금지합니다.
+            """)
+
+            let prompt = """
+            [직무] \(profile.role)
+            압박 면접 질문 \(count)개를 생성하세요. 각 질문은 30~45초 안에 답할 수 있어야 합니다.
+            """
+
+            let response = try await session.respond(to: prompt, generating: GeneratedBehavioralQuestionSet.self)
+            let questions = response.content.questions.compactMap { item -> GeneratedQuestion? in
+                guard InterviewQuestionValidator.isValidQuestionText(item.questionText) else { return nil }
+                return GeneratedQuestion(
+                    questionText: item.questionText,
+                    promptKeywords: item.promptKeywords.isEmpty ? "핵심, 근거, 결론" : item.promptKeywords,
+                    recommendedSeconds: min(max(item.recommendedSeconds, 30), 45),
+                    category: .pressure
+                )
+            }
+            return questions.count >= count ? Array(questions.prefix(count)) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func pressureFallbackQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "방금 말씀하신 내용 중 가장 약한 부분은 무엇이라고 생각하시나요?",
+            "같은 경험을 처음부터 다시 한다면 무엇을 다르게 하시겠습니까?",
+            "왜 \(profile.company)가 아닌 다른 회사가 아닌지 한 문장으로 답해 주세요.",
+            "지원자님의 경력에서 가장 큰 약점은 무엇이라고 보시나요?",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "핵심, 근거, 결론",
+                recommendedSeconds: 40,
+                category: .pressure
+            )
+        }
+    }
+
+    private func generateComprehensiveWithFoundationModels(
+        profile: CandidateProfile,
+        count: Int
+    ) async -> [GeneratedQuestion]? {
+        do {
+            let session = LanguageModelSession(instructions: """
+            면접 후반 종합 질문을 생성합니다. 지금까지의 답변을 바탕으로 강점·적합성을 종합하도록 유도합니다.
+            """)
+
+            let prompt = """
+            [회사] \(profile.company)
+            [직무] \(profile.role)
+            종합·마무리 성격의 심층 질문 \(count)개를 생성하세요.
+            """
+
+            let response = try await session.respond(to: prompt, generating: GeneratedBehavioralQuestionSet.self)
+            let questions = response.content.questions.compactMap { item -> GeneratedQuestion? in
+                guard InterviewQuestionValidator.isValidQuestionText(item.questionText) else { return nil }
+                return GeneratedQuestion(
+                    questionText: item.questionText,
+                    promptKeywords: item.promptKeywords.isEmpty ? "강점, 적합성, 기여, 비전" : item.promptKeywords,
+                    recommendedSeconds: min(max(item.recommendedSeconds, 75), 120),
+                    category: .comprehensive
+                )
+            }
+            return questions.count >= count ? Array(questions.prefix(count)) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func comprehensiveFallbackQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "지금까지 답변을 종합해 본인의 핵심 강점과 \(profile.company)에 기여할 수 있는 점을 정리해 주세요.",
+            "입사 후 6개월 안에 달성하고 싶은 목표와 그 이유를 말씀해 주세요.",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "강점, 적합성, 기여, 비전",
+                recommendedSeconds: 90,
+                category: .comprehensive
             )
         }
     }

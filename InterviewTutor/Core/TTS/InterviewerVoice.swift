@@ -6,14 +6,14 @@ final class InterviewerVoice {
     private let synthesizer = AVSpeechSynthesizer()
     private var continuation: CheckedContinuation<Void, Never>?
 
-    func speak(_ text: String, language: String = "ko-KR") async {
+    func speak(_ text: String, tone: InterviewerTone = .neutral, language: String = "ko-KR") async {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
 
             let utterance = AVSpeechUtterance(string: text)
             utterance.voice = AVSpeechSynthesisVoice(language: language)
-            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * 0.9
-            utterance.pitchMultiplier = 1.0
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * tone.speechRateMultiplier
+            utterance.pitchMultiplier = tone.pitchMultiplier
 
             synthesizer.delegate = SpeechDelegate(owner: self)
             synthesizer.speak(utterance)

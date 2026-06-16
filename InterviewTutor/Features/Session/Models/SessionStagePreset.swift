@@ -37,6 +37,15 @@ struct SessionStagePreset: Equatable {
                 followUpRecommendedSeconds: 30,
                 poolTargetSize: 12
             )
+        case .freePractice:
+            SessionStagePreset(
+                documentQuestionCount: 2,
+                behavioralQuestionCount: 0,
+                companyQuestionCount: 0,
+                generatesFollowUps: false,
+                followUpRecommendedSeconds: 0,
+                poolTargetSize: 0
+            )
         }
     }
 

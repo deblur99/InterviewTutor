@@ -8,12 +8,19 @@ struct PreSessionView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var viewModel: SessionViewModel
+    @State private var expertConfig: ExpertSessionConfiguration
     @State private var navigateToSession = false
 
     init(profile: CandidateProfile, stage: SessionStage) {
         self.profile = profile
         self.stage = stage
-        _viewModel = State(initialValue: SessionViewModel(profile: profile, stage: stage))
+        let config = stage == .expert ? profile.expertSessionConfiguration : .default
+        _expertConfig = State(initialValue: config)
+        _viewModel = State(initialValue: SessionViewModel(
+            profile: profile,
+            stage: stage,
+            expertConfiguration: stage == .expert ? config : nil
+        ))
     }
 
     private var loadingMessage: String {
@@ -24,32 +31,71 @@ struct PreSessionView: View {
         }
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                StageBadgeView(stage: stage)
-                Spacer()
-            }
-
-            Text("세션 미리보기")
-                .font(.largeTitle.bold())
-
-            if viewModel.isLoadingQuestions {
-                ProgressView(loadingMessage)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                summaryCard
-                questionPreview
-                Spacer()
-                startButton
-            }
+    private var sessionSummary: String {
+        if stage == .expert {
+            expertConfig.sessionSummaryLabel
+        } else {
+            stage.preset.sessionSummaryLabel
         }
-        .padding(32)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                HStack {
+                    StageBadgeView(stage: stage)
+                    Spacer()
+                }
+
+                Text("세션 미리보기")
+                    .font(.largeTitle.bold())
+
+                if stage == .expert {
+                    ExpertSessionSetupView(
+                        configuration: $expertConfig,
+                        weaknessSummary: WeakTopicAnalyzer.weaknessSummary(from: profile)
+                    )
+                }
+
+                if viewModel.isLoadingQuestions {
+                    ProgressView(loadingMessage)
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                } else {
+                    summaryCard
+                    questionPreview
+                    CenteredPrimaryActionButton(
+                        title: "면접 시작",
+                        systemImage: "video.fill",
+                        isDisabled: viewModel.questionFlow.questions.isEmpty
+                    ) {
+                        if stage == .expert {
+                            viewModel.persistExpertConfiguration(expertConfig, context: modelContext)
+                        }
+                        navigateToSession = true
+                    }
+                    .padding(.top, 8)
+                }
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .navigationTitle("세션 준비")
         .task {
-            await viewModel.prepareQuestions(context: modelContext)
+            if stage == .expert {
+                await viewModel.prepareExpertIfNeeded(expertConfig, context: modelContext)
+            } else {
+                await viewModel.prepareQuestions(context: modelContext)
+            }
+        }
+        .onChange(of: expertConfig.preparationToken) { _, _ in
+            guard stage == .expert else { return }
+            viewModel.scheduleExpertConfigurationUpdate(expertConfig, context: modelContext)
         }
         .onDisappear {
+            viewModel.cancelPendingConfigurationUpdates()
+            if stage == .expert {
+                viewModel.persistExpertConfiguration(expertConfig, context: modelContext)
+            }
             if !navigateToSession {
                 viewModel.releaseReservedQuestions(context: modelContext)
             }
@@ -72,9 +118,13 @@ struct PreSessionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("질문 수", value: "\(viewModel.questionFlow.totalCount)개")
                 LabeledContent("예상 시간", value: "\(viewModel.questionFlow.expectedDurationSeconds / 60)분")
-                LabeledContent("구성", value: stage.preset.sessionSummaryLabel)
+                LabeledContent("구성", value: sessionSummary)
+                if stage == .expert {
+                    LabeledContent("면접관 톤", value: expertConfig.interviewerTone.displayName)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
         }
     }
 
@@ -90,8 +140,17 @@ struct PreSessionView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 20, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(question.questionText)
-                            .font(.subheadline)
+                        HStack(spacing: 6) {
+                            Text(question.questionText)
+                                .font(.subheadline)
+                            if stage == .expert, question.category != .selfIntro, question.category != .closing {
+                                Text(question.category.displayName)
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(.quaternary, in: Capsule())
+                            }
+                        }
                         Text("\(question.recommendedSeconds)초 권장")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -100,17 +159,5 @@ struct PreSessionView: View {
                 .padding(.vertical, 4)
             }
         }
-    }
-
-    private var startButton: some View {
-        Button {
-            navigateToSession = true
-        } label: {
-            Label("면접 시작", systemImage: "video.fill")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled(viewModel.questionFlow.questions.isEmpty)
     }
 }

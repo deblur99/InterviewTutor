@@ -32,7 +32,7 @@ final class ContentScorer {
     ) async -> Int? {
         do {
             let instructions = switch stage {
-            case .beginner:
+            case .beginner, .freePractice:
                 """
                 화상면접 답변 내용을 0~100점으로 평가합니다.
                 질문 적합성, 구체성, 논리 구조, 키워드 반영을 기준으로 합리적인 점수를 부여하세요.
@@ -65,7 +65,7 @@ final class ContentScorer {
 
         let weighted: Double
         switch stage {
-        case .beginner:
+        case .beginner, .freePractice:
             weighted = keywordScore * 0.45 + lengthScore * 0.25 + starScore * 0.30
         case .skilled, .expert:
             weighted = keywordScore * 0.35 + lengthScore * 0.20 + starScore * 0.35

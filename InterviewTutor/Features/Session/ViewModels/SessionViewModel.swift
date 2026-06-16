@@ -8,6 +8,7 @@ import SwiftUI
 final class SessionViewModel {
     let profile: CandidateProfile
     let stage: SessionStage
+    private(set) var expertConfiguration: ExpertSessionConfiguration?
 
     private(set) var phase: SessionPhase = .preSession
     private(set) var questionFlow = QuestionFlowViewModel()
@@ -39,10 +40,21 @@ final class SessionViewModel {
     private var reservedPoolQuestionIDs: [UUID] = []
     private var sessionStarted = false
     private var modelContext: ModelContext?
+    private var configurationUpdateTask: Task<Void, Never>?
+    private var lastPreparedExpertConfiguration: ExpertSessionConfiguration?
 
-    init(profile: CandidateProfile, stage: SessionStage) {
+    init(profile: CandidateProfile, stage: SessionStage, expertConfiguration: ExpertSessionConfiguration? = nil) {
         self.profile = profile
         self.stage = stage
+        self.expertConfiguration = stage == .expert ? (expertConfiguration ?? profile.expertSessionConfiguration) : nil
+    }
+
+    private var interviewerTone: InterviewerTone {
+        expertConfiguration?.interviewerTone ?? .neutral
+    }
+
+    private var preAnswerPause: TimeInterval {
+        stage == .expert ? interviewerTone.preAnswerPauseSeconds : 1.5
     }
 
     var currentQuestion: GeneratedQuestion? {
@@ -88,15 +100,82 @@ final class SessionViewModel {
         hudController.hide()
     }
 
+    func updateExpertConfiguration(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
+        await applyExpertConfiguration(configuration, context: context)
+    }
+
+    func scheduleExpertConfigurationUpdate(_ configuration: ExpertSessionConfiguration, context: ModelContext) {
+        configurationUpdateTask?.cancel()
+        configurationUpdateTask = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await applyExpertConfiguration(configuration, context: context)
+        }
+    }
+
+    func prepareExpertIfNeeded(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
+        await applyExpertConfiguration(configuration, context: context)
+    }
+
+    func persistExpertConfiguration(_ configuration: ExpertSessionConfiguration, context: ModelContext) {
+        guard stage == .expert else { return }
+        profile.expertSessionConfiguration = configuration
+        try? context.save()
+    }
+
+    func cancelPendingConfigurationUpdates() {
+        configurationUpdateTask?.cancel()
+        configurationUpdateTask = nil
+    }
+
+    private func applyExpertConfiguration(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
+        guard stage == .expert else { return }
+
+        expertConfiguration = configuration
+
+        if configuration == lastPreparedExpertConfiguration, !questionFlow.questions.isEmpty {
+            return
+        }
+
+        releaseReservedQuestions(context: context)
+        await prepareQuestions(context: context)
+
+        if !questionFlow.questions.isEmpty {
+            lastPreparedExpertConfiguration = configuration
+        }
+    }
+
+    private func speakQuestion(_ text: String) async {
+        await interviewerVoice.speak(text, tone: interviewerTone)
+    }
+
+    private func answerDuration(for question: GeneratedQuestion) -> TimeInterval {
+        if stage == .expert, let config = expertConfiguration {
+            return TimeInterval(config.adjustedSeconds(question.recommendedSeconds, category: question.category))
+        }
+        return TimeInterval(question.recommendedSeconds)
+    }
+
     func clearError() {
         errorMessage = nil
+    }
+
+    private var poolThresholdForLoadingIndicator: Int {
+        switch stage {
+        case .beginner, .skilled:
+            stage.preset.documentQuestionCount
+        case .expert:
+            expertConfiguration?.documentQuestionCount ?? ExpertSessionConfiguration.default.documentQuestionCount
+        case .freePractice:
+            0
+        }
     }
 
     func prepareQuestions(context: ModelContext) async {
         modelContext = context
         isLoadingQuestions = true
         isLoadingFromPool = questionPoolManager.unusedCount(for: profile, stage: stage)
-            >= stage.preset.documentQuestionCount
+            >= poolThresholdForLoadingIndicator
         defer {
             isLoadingQuestions = false
             isLoadingFromPool = false
@@ -105,6 +184,7 @@ final class SessionViewModel {
         let sessionSet = await questionPoolManager.prepareSessionQuestions(
             profile: profile,
             stage: stage,
+            expertConfiguration: expertConfiguration,
             context: context
         )
         questionFlow.setQuestions(sessionSet.questions)
@@ -188,15 +268,15 @@ final class SessionViewModel {
         guard let question = currentQuestion, let questionID = questionIDMap[questionFlow.currentIndex] else { return }
 
         phase = .questionTTS
-        await interviewerVoice.speak(question.questionText)
+        await speakQuestion(question.questionText)
 
         phase = .pauseBeforeAnswer
-        try? await Task.sleep(for: .seconds(1.5))
+        try? await Task.sleep(for: .seconds(preAnswerPause))
 
         phase = .selfIntro
         await cameraManager.markSegmentStart(questionID: questionID)
         await beginAnswerMonitoring()
-        startTimer(duration: TimeInterval(question.recommendedSeconds))
+        startTimer(duration: answerDuration(for: question))
         await waitForTimerCompletion(extraGrace: 2)
         await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)
@@ -209,10 +289,10 @@ final class SessionViewModel {
     private func runQuestionLoop() async {
         while let question = currentQuestion, questionFlow.currentIndex < questionFlow.totalCount - 1 {
             phase = .questionTTS
-            await interviewerVoice.speak(question.questionText)
+            await speakQuestion(question.questionText)
 
             phase = .pauseBeforeAnswer
-            try? await Task.sleep(for: .seconds(1.5))
+            try? await Task.sleep(for: .seconds(preAnswerPause))
 
             guard let questionID = questionIDMap[questionFlow.currentIndex] else { break }
             let answeredIndex = questionFlow.currentIndex
@@ -220,7 +300,7 @@ final class SessionViewModel {
             phase = .answering
             await cameraManager.markSegmentStart(questionID: questionID)
             await beginAnswerMonitoring()
-            startTimer(duration: TimeInterval(question.recommendedSeconds))
+            startTimer(duration: answerDuration(for: question))
             await waitForTimerCompletion(extraGrace: 5)
             await endAnswerMonitoring()
             _ = await cameraManager.markSegmentEnd(questionID: questionID)
@@ -234,8 +314,21 @@ final class SessionViewModel {
     }
 
     private func maybeInsertFollowUp(afterIndex index: Int, parentQuestion: GeneratedQuestion) async {
-        guard stage.preset.generatesFollowUps,
-              parentQuestion.category == .documentBased else { return }
+        let generatesFollowUps = stage == .expert
+            ? (expertConfiguration?.generatesFollowUps ?? true)
+            : stage.preset.generatesFollowUps
+        guard generatesFollowUps else { return }
+
+        let eligibleParent: Bool
+        switch parentQuestion.category {
+        case .documentBased:
+            eligibleParent = true
+        case .technical:
+            eligibleParent = stage == .expert
+        default:
+            eligibleParent = false
+        }
+        guard eligibleParent else { return }
 
         let transcript = coachMonitor.consumeLastTranscript()
         let followUp = await followUpGenerator.generate(
@@ -257,15 +350,15 @@ final class SessionViewModel {
         guard let question = currentQuestion, let questionID = questionIDMap[questionFlow.currentIndex] else { return }
 
         phase = .questionTTS
-        await interviewerVoice.speak(question.questionText)
+        await speakQuestion(question.questionText)
 
         phase = .pauseBeforeAnswer
-        try? await Task.sleep(for: .seconds(1.5))
+        try? await Task.sleep(for: .seconds(preAnswerPause))
 
         phase = .closing
         await cameraManager.markSegmentStart(questionID: questionID)
         await beginAnswerMonitoring()
-        startTimer(duration: TimeInterval(question.recommendedSeconds))
+        startTimer(duration: answerDuration(for: question))
         await waitForTimerCompletion(extraGrace: 10)
         await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)

@@ -34,12 +34,12 @@ final class SessionCoachMonitor {
     private var previousFillerCount = 0
     private var lastHintShownAt: [CoachHintKind: Date] = [:]
     private var speechAuthorized = false
+    private var capturedTranscript = ""
 
-    func configure(speechAuthorized: Bool, defaultHUDEnabled: Bool) {
+    func configure(speechAuthorized: Bool, defaultCoachEnabled: Bool = true, defaultHUDEnabled: Bool) {
         self.speechAuthorized = speechAuthorized
-        if !isHUDEnabled {
-            isHUDEnabled = defaultHUDEnabled
-        }
+        isCoachEnabled = defaultCoachEnabled
+        isHUDEnabled = defaultHUDEnabled
     }
 
     func setCoachEnabled(_ enabled: Bool) {
@@ -54,11 +54,12 @@ final class SessionCoachMonitor {
     }
 
     func startAnswering(keywords: [String]) async {
-        resetSessionState()
+        resetMonitoringMetrics()
         self.keywords = keywords
         isMonitoring = true
         answerStartedAt = .now
         lastSpeechAt = .now
+        capturedTranscript = ""
 
         guard speechAuthorized else { return }
 
@@ -74,10 +75,16 @@ final class SessionCoachMonitor {
     }
 
     func stopAnswering() async {
-        _ = await streamingRecognizer.stop()
+        capturedTranscript = await streamingRecognizer.stop()
         isMonitoring = false
         activeHint = nil
-        resetSessionState()
+        resetMonitoringMetrics()
+    }
+
+    func consumeLastTranscript() -> String {
+        let transcript = capturedTranscript
+        capturedTranscript = ""
+        return transcript
     }
 
     nonisolated func processVideoSample(_ sampleBuffer: CMSampleBuffer) {
@@ -109,6 +116,7 @@ final class SessionCoachMonitor {
 
     private func handlePartialTranscript(_ transcript: String) {
         partialTranscript = transcript
+        capturedTranscript = transcript
         let report = FillerWordAnalyzer.analyze(transcript)
         liveFillerCount = report.totalCount
 
@@ -184,7 +192,7 @@ final class SessionCoachMonitor {
         }
     }
 
-    private func resetSessionState() {
+    private func resetMonitoringMetrics() {
         keywords = []
         partialTranscript = ""
         answerStartedAt = nil

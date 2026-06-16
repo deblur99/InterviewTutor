@@ -72,7 +72,7 @@ struct PreSessionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 LabeledContent("질문 수", value: "\(viewModel.questionFlow.totalCount)개")
                 LabeledContent("예상 시간", value: "\(viewModel.questionFlow.expectedDurationSeconds / 60)분")
-                LabeledContent("구성", value: "자기소개 → 서류 기반 \(viewModel.questionFlow.documentQuestionCount)문항 → 마무리")
+                LabeledContent("구성", value: stage.preset.sessionSummaryLabel)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

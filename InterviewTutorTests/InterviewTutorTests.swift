@@ -238,9 +238,9 @@ struct QuestionFlowViewModelTests {
     @Test func buildsExpectedDurationFromQuestions() {
         let flow = QuestionFlowViewModel()
         flow.setQuestions([
-            GeneratedQuestion(id: UUID(), questionText: "A", promptKeywords: "", recommendedSeconds: 60),
-            GeneratedQuestion(id: UUID(), questionText: "B", promptKeywords: "", recommendedSeconds: 45),
-            GeneratedQuestion(id: UUID(), questionText: "C", promptKeywords: "", recommendedSeconds: 60),
+            GeneratedQuestion(id: UUID(), questionText: "A", promptKeywords: "", recommendedSeconds: 60, category: .selfIntro),
+            GeneratedQuestion(id: UUID(), questionText: "B", promptKeywords: "", recommendedSeconds: 45, category: .documentBased),
+            GeneratedQuestion(id: UUID(), questionText: "C", promptKeywords: "", recommendedSeconds: 60, category: .closing),
         ])
 
         #expect(flow.totalCount == 3)
@@ -264,14 +264,49 @@ struct QuestionFlowViewModelTests {
     @Test func mapsCategories() {
         let flow = QuestionFlowViewModel()
         flow.setQuestions([
-            GeneratedQuestion(id: UUID(), questionText: "A", promptKeywords: "", recommendedSeconds: 60),
-            GeneratedQuestion(id: UUID(), questionText: "B", promptKeywords: "", recommendedSeconds: 45),
-            GeneratedQuestion(id: UUID(), questionText: "C", promptKeywords: "", recommendedSeconds: 60),
+            GeneratedQuestion(id: UUID(), questionText: "A", promptKeywords: "", recommendedSeconds: 60, category: .selfIntro),
+            GeneratedQuestion(id: UUID(), questionText: "B", promptKeywords: "", recommendedSeconds: 45, category: .documentBased),
+            GeneratedQuestion(id: UUID(), questionText: "C", promptKeywords: "", recommendedSeconds: 60, category: .closing),
         ])
 
         #expect(flow.category(for: 0) == .selfIntro)
         #expect(flow.category(for: 1) == .documentBased)
         #expect(flow.category(for: 2) == .closing)
+    }
+
+    @Test func insertsFollowUpAfterDocumentQuestion() {
+        let flow = QuestionFlowViewModel()
+        let docID = UUID()
+        flow.setQuestions([
+            GeneratedQuestion(id: UUID(), questionText: "Intro", promptKeywords: "", recommendedSeconds: 60, category: .selfIntro),
+            GeneratedQuestion(id: docID, questionText: "Doc", promptKeywords: "", recommendedSeconds: 60, category: .documentBased),
+            GeneratedQuestion(id: UUID(), questionText: "Close", promptKeywords: "", recommendedSeconds: 60, category: .closing),
+        ])
+
+        let followUp = GeneratedQuestion(questionText: "Follow", promptKeywords: "역할", recommendedSeconds: 30, category: .followUp)
+        flow.insertFollowUp(followUp, afterIndex: 1)
+
+        #expect(flow.totalCount == 4)
+        #expect(flow.category(for: 2) == .followUp)
+        #expect(flow.questions[1].id == docID)
+    }
+}
+
+struct SessionStagePresetTests {
+
+    @Test func skilledPresetIncludesFollowUps() {
+        let preset = SessionStagePreset.preset(for: .skilled)
+        #expect(preset.documentQuestionCount == 3)
+        #expect(preset.behavioralQuestionCount == 2)
+        #expect(preset.companyQuestionCount == 1)
+        #expect(preset.generatesFollowUps)
+        #expect(preset.sessionSummaryLabel.contains("꼬리질문"))
+    }
+
+    @Test func skilledStageIsAvailable() {
+        #expect(SessionStage.skilled.isAvailable)
+        #expect(!SessionStage.expert.isAvailable)
+        #expect(!SessionStage.skilled.coachEnabledByDefault)
     }
 }
 

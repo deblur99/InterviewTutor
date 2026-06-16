@@ -68,7 +68,9 @@ struct HomeView: View {
             guard let activeProfile, activeProfile.isComplete else { return }
             poolRefillTask?.cancel()
             poolRefillTask = Task {
-                await QuestionPoolManager().ensurePoolFilled(profile: activeProfile, context: modelContext)
+                let manager = QuestionPoolManager()
+                await manager.ensurePoolFilled(profile: activeProfile, stage: .beginner, context: modelContext)
+                await manager.ensurePoolFilled(profile: activeProfile, stage: .skilled, context: modelContext)
             }
         }
         .onDisappear {

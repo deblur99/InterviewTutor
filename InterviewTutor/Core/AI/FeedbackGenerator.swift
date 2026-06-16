@@ -15,7 +15,7 @@ final class FeedbackGenerator {
             let recommended = TimeInterval(question.recommendedSeconds)
 
             if case .available = model.availability, !question.transcribedAnswer.isEmpty {
-                if let feedback = await generateAIFeedback(for: question) {
+                if let feedback = await generateAIFeedback(for: question, stage: .beginner) {
                     results[question.orderIndex] = feedback
                     continue
                 }
@@ -34,10 +34,11 @@ final class FeedbackGenerator {
 
     func generateFeedbackForQuestion(
         _ question: QuestionRecord,
-        fillerReport: FillerWordReport?
+        fillerReport: FillerWordReport?,
+        stage: SessionStage = .beginner
     ) async -> String {
         if case .available = model.availability, !question.transcribedAnswer.isEmpty {
-            if let feedback = await generateAIFeedback(for: question) {
+            if let feedback = await generateAIFeedback(for: question, stage: stage) {
                 return feedback
             }
         }
@@ -47,16 +48,27 @@ final class FeedbackGenerator {
             question: question,
             fillerCount: fillerReport?.totalCount ?? question.fillerWordCount,
             duration: duration,
-            recommended: TimeInterval(question.recommendedSeconds)
+            recommended: TimeInterval(question.recommendedSeconds),
+            stage: stage
         )
     }
 
-    private func generateAIFeedback(for question: QuestionRecord) async -> String? {
+    private func generateAIFeedback(for question: QuestionRecord, stage: SessionStage) async -> String? {
         do {
-            let session = LanguageModelSession(instructions: """
-            화상면접 연습 코치로서 지원자의 답변에 대해 간결하고 건설적인 피드백을 제공합니다.
-            3~5문장으로 답변 구조, 구체성, 개선점을 제시하세요.
-            """)
+            let instructions = switch stage {
+            case .beginner:
+                """
+                화상면접 연습 코치로서 지원자의 답변에 대해 간결하고 건설적인 피드백을 제공합니다.
+                3~5문장으로 답변 구조, 구체성, 개선점을 제시하세요.
+                """
+            case .skilled, .expert:
+                """
+                숙련 단계 화상면접 코치입니다. 답변의 구체성, 논리 구조(SITUATION-ACTION-RESULT), 질문 적합성을 중심으로 평가하세요.
+                추상적 표현·근거 부족·결론 누락을 지적하고, 한 가지 실행 가능한 개선 제안을 포함하세요. 3~5문장.
+                """
+            }
+
+            let session = LanguageModelSession(instructions: instructions)
 
             let prompt = """
             [질문] \(question.questionText)
@@ -77,14 +89,21 @@ final class FeedbackGenerator {
         question: QuestionRecord,
         fillerCount: Int,
         duration: TimeInterval,
-        recommended: TimeInterval
+        recommended: TimeInterval,
+        stage: SessionStage = .beginner
     ) -> String {
         var parts: [String] = []
 
         if question.transcribedAnswer.isEmpty {
             parts.append("답변이 인식되지 않았습니다. 마이크와 발음을 확인해 주세요.")
         } else if question.transcribedAnswer.count < 30 {
-            parts.append("답변이 다소 짧습니다. STAR 구조(상황-과제-행동-결과)로 구체적 사례를 추가해 보세요.")
+            if stage == .beginner {
+                parts.append("답변이 다소 짧습니다. STAR 구조(상황-과제-행동-결과)로 구체적 사례를 추가해 보세요.")
+            } else {
+                parts.append("답변이 다소 짧습니다. 상황·본인 역할·행동·결과를 순서대로 보강해 보세요.")
+            }
+        } else if stage == .skilled || stage == .expert {
+            parts.append("답변 내용이 인식되었습니다. 주장마다 근거 사례와 수치를 연결하면 논리 구조가 더 명확해집니다.")
         } else {
             parts.append("답변 내용이 인식되었습니다. 핵심 성과를 수치로 보강하면 더 설득력이 높아집니다.")
         }

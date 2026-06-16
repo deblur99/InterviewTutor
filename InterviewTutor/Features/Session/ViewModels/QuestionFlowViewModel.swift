@@ -15,7 +15,7 @@ final class QuestionFlowViewModel {
     var totalCount: Int { questions.count }
 
     var documentQuestionCount: Int {
-        max(0, questions.count - 2)
+        questions.filter { $0.category == .documentBased }.count
     }
 
     var expectedDurationSeconds: Int {
@@ -33,13 +33,17 @@ final class QuestionFlowViewModel {
         return true
     }
 
+    func insertFollowUp(_ question: GeneratedQuestion, afterIndex index: Int) {
+        let insertAt = min(index + 1, questions.count)
+        questions.insert(question, at: insertAt)
+    }
+
     func reset() {
         currentIndex = 0
     }
 
     func category(for index: Int) -> QuestionCategory {
-        if index == 0 { return .selfIntro }
-        if index == questions.count - 1 { return .closing }
-        return .documentBased
+        guard index >= 0, index < questions.count else { return .documentBased }
+        return questions[index].category
     }
 }

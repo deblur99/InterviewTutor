@@ -28,6 +28,7 @@ final class SessionViewModel {
     private let speechRecognizer = SpeechRecognizer()
     private let questionPoolManager = QuestionPoolManager()
     private let feedbackGenerator = FeedbackGenerator()
+    private let followUpGenerator = FollowUpQuestionGenerator()
     private let segmentVisionAnalyzer = SegmentVisionAnalyzer()
     private let contentScorer = ContentScorer()
 
@@ -94,13 +95,18 @@ final class SessionViewModel {
     func prepareQuestions(context: ModelContext) async {
         modelContext = context
         isLoadingQuestions = true
-        isLoadingFromPool = questionPoolManager.unusedCount(for: profile) >= QuestionPoolManager.sessionDocumentQuestionCount
+        isLoadingFromPool = questionPoolManager.unusedCount(for: profile, stage: stage)
+            >= stage.preset.documentQuestionCount
         defer {
             isLoadingQuestions = false
             isLoadingFromPool = false
         }
 
-        let sessionSet = await questionPoolManager.prepareSessionQuestions(profile: profile, context: context)
+        let sessionSet = await questionPoolManager.prepareSessionQuestions(
+            profile: profile,
+            stage: stage,
+            context: context
+        )
         questionFlow.setQuestions(sessionSet.questions)
         reservedPoolQuestionIDs = sessionSet.reservedDocumentQuestionIDs
         questionIDMap = Dictionary(
@@ -139,7 +145,8 @@ final class SessionViewModel {
         let speechAuthorized = await speechRecognizer.requestAuthorization()
         coachMonitor.configure(
             speechAuthorized: speechAuthorized,
-            defaultHUDEnabled: stage == .beginner
+            defaultCoachEnabled: stage.coachEnabledByDefault,
+            defaultHUDEnabled: stage.coachHUDEnabledByDefault
         )
 
         let monitor = coachMonitor
@@ -208,6 +215,7 @@ final class SessionViewModel {
             try? await Task.sleep(for: .seconds(1.5))
 
             guard let questionID = questionIDMap[questionFlow.currentIndex] else { break }
+            let answeredIndex = questionFlow.currentIndex
 
             phase = .answering
             await cameraManager.markSegmentStart(questionID: questionID)
@@ -217,10 +225,32 @@ final class SessionViewModel {
             await endAnswerMonitoring()
             _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
+            await maybeInsertFollowUp(afterIndex: answeredIndex, parentQuestion: question)
+
             if !questionFlow.advance() { break }
         }
 
         await runClosing()
+    }
+
+    private func maybeInsertFollowUp(afterIndex index: Int, parentQuestion: GeneratedQuestion) async {
+        guard stage.preset.generatesFollowUps,
+              parentQuestion.category == .documentBased else { return }
+
+        let transcript = coachMonitor.consumeLastTranscript()
+        let followUp = await followUpGenerator.generate(
+            profile: profile,
+            parentQuestion: parentQuestion,
+            answerTranscript: transcript
+        )
+        questionFlow.insertFollowUp(followUp, afterIndex: index)
+        reindexQuestionIDMap()
+    }
+
+    private func reindexQuestionIDMap() {
+        questionIDMap = Dictionary(
+            uniqueKeysWithValues: questionFlow.questions.enumerated().map { ($0.offset, $0.element.id) }
+        )
     }
 
     private func runClosing() async {
@@ -317,7 +347,11 @@ final class SessionViewModel {
                     let fillerReport = FillerWordAnalyzer.analyze(transcript)
                     fillerCount = fillerReport.totalCount
                     record.fillerWordCount = fillerCount
-                    record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(record, fillerReport: fillerReport)
+                    record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(
+                        record,
+                        fillerReport: fillerReport,
+                        stage: stage
+                    )
                 } catch {
                     record.aiFeedback = "음성 인식에 실패했습니다. 마이크 설정을 확인해 주세요."
                 }
@@ -331,7 +365,7 @@ final class SessionViewModel {
                 duration: duration,
                 recommendedSeconds: record.recommendedSeconds
             )
-            let contentScore = await contentScorer.score(question: record, transcript: transcript)
+            let contentScore = await contentScorer.score(question: record, transcript: transcript, stage: stage)
             let postureScore = PostureScorer.score(metrics: postureMetrics)
 
             SessionScoringEngine.applyQuestionScores(
@@ -366,7 +400,7 @@ final class SessionViewModel {
                 context: modelContext
             )
             Task {
-                await questionPoolManager.ensurePoolFilled(profile: profile, context: modelContext)
+                await questionPoolManager.ensurePoolFilled(profile: profile, stage: stage, context: modelContext)
             }
         }
         reservedPoolQuestionIDs = []

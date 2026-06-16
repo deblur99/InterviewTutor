@@ -74,7 +74,7 @@ struct SessionView: View {
             }
 
             VStack(spacing: 8) {
-                if viewModel.phase.isAnsweringPhase {
+                if viewModel.phase.isAnsweringPhase, viewModel.isCoachEnabled {
                     LiveCoachStatusBar(
                         fillerCount: viewModel.coachMonitor.liveFillerCount,
                         keywordCoveragePercent: viewModel.coachMonitor.keywordCoveragePercent,
@@ -115,7 +115,7 @@ struct SessionView: View {
 
             InWindowPrompterView(
                 keywords: viewModel.currentKeywords,
-                showAnswerHints: viewModel.stage == .beginner
+                showAnswerHints: viewModel.stage.showsFullPrompter
             )
 
             Spacer()

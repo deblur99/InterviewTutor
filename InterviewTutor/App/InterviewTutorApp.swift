@@ -22,6 +22,7 @@ struct InterviewTutorApp: App {
     var body: some Scene {
         WindowGroup {
             HomeView()
+                .environment(ActiveProfileStore())
         }
         .modelContainer(sharedModelContainer)
         .defaultSize(width: 1100, height: 750)

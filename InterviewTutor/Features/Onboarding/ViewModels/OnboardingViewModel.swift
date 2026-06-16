@@ -13,6 +13,7 @@ final class OnboardingViewModel {
     var currentStep = 0
 
     var isImporting = false
+    var importingFileCount = 0
     var importErrorMessage: String?
     var pendingReview: PendingTextReview?
     var reviewDraftText = ""
@@ -69,18 +70,20 @@ final class OnboardingViewModel {
         importErrorMessage = nil
     }
 
-    func importDocument(from url: URL) async {
+    func importDocuments(from urls: [URL]) async {
         guard let field = activeImportField else { return }
 
         isImporting = true
+        importingFileCount = urls.count
         importErrorMessage = nil
         defer {
             isImporting = false
+            importingFileCount = 0
             activeImportField = nil
         }
 
         do {
-            let result = try await textExtractor.extract(from: url)
+            let result = try await textExtractor.extract(from: urls)
             pendingReview = PendingTextReview(
                 field: field,
                 extractedText: result.text,
@@ -94,6 +97,10 @@ final class OnboardingViewModel {
         } catch {
             importErrorMessage = error.localizedDescription
         }
+    }
+
+    func importDocument(from url: URL) async {
+        await importDocuments(from: [url])
     }
 
     func refineReviewDraftText() async {
@@ -162,7 +169,9 @@ final class OnboardingViewModel {
         }
     }
 
-    func save(context: ModelContext) {
+    @discardableResult
+    func save(context: ModelContext) -> CandidateProfile {
+        let profile: CandidateProfile
         if let existingProfile {
             existingProfile.company = company
             existingProfile.industry = industry
@@ -171,8 +180,11 @@ final class OnboardingViewModel {
             existingProfile.resumeText = resumeText
             existingProfile.coverLetterText = coverLetterText
             existingProfile.updatedAt = .now
+            existingProfile.ensureProfileID()
+            profile = existingProfile
         } else {
-            let profile = CandidateProfile(
+            let newProfile = CandidateProfile(
+                profileID: UUID(),
                 company: company,
                 industry: industry,
                 role: role,
@@ -180,8 +192,22 @@ final class OnboardingViewModel {
                 resumeText: resumeText,
                 coverLetterText: coverLetterText
             )
-            context.insert(profile)
+            context.insert(newProfile)
+            profile = newProfile
         }
         try? context.save()
+        return profile
+    }
+
+    func resetForNewProfile() {
+        company = ""
+        industry = ""
+        role = ""
+        jobDescription = ""
+        resumeText = ""
+        coverLetterText = ""
+        currentStep = 0
+        dismissPendingReview()
+        clearImportError()
     }
 }

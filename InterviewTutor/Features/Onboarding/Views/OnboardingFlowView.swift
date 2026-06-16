@@ -1,19 +1,43 @@
 import SwiftUI
 import SwiftData
 
+enum OnboardingMode {
+    case create
+    case edit
+}
+
 struct OnboardingFlowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    let mode: OnboardingMode
+    let onSaved: ((CandidateProfile) -> Void)?
+
     @State private var viewModel: OnboardingViewModel
     @State private var showFileImporter = false
+    @State private var showCreateAnotherPrompt = false
 
-    init(profile: CandidateProfile? = nil) {
+    init(
+        profile: CandidateProfile? = nil,
+        mode: OnboardingMode? = nil,
+        onSaved: ((CandidateProfile) -> Void)? = nil
+    ) {
         _viewModel = State(initialValue: OnboardingViewModel(profile: profile))
+        if profile != nil {
+            self.mode = .edit
+        } else {
+            self.mode = mode ?? .create
+        }
+        self.onSaved = onSaved
     }
 
     private var navigationTitle: String {
-        viewModel.isEditingExistingProfile ? "프로필 수정" : "온보딩"
+        switch mode {
+        case .create:
+            "프로필 추가"
+        case .edit:
+            "프로필 수정"
+        }
     }
 
     var body: some View {
@@ -66,7 +90,7 @@ struct OnboardingFlowView: View {
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: OnboardingViewModel.supportedContentTypes,
-                allowsMultipleSelection: false
+                allowsMultipleSelection: true
             ) { result in
                 handleImportResult(result)
             }
@@ -100,6 +124,20 @@ struct OnboardingFlowView: View {
                 Button("확인") { viewModel.clearImportError() }
             } message: {
                 Text(viewModel.importErrorMessage ?? "")
+            }
+            .confirmationDialog(
+                "프로필이 저장되었습니다",
+                isPresented: $showCreateAnotherPrompt,
+                titleVisibility: .visible
+            ) {
+                Button("홈으로") {
+                    dismiss()
+                }
+                Button("다른 프로필 추가") {
+                    viewModel.resetForNewProfile()
+                }
+            } message: {
+                Text("다른 지원 회사 프로필을 계속 추가할 수 있습니다.")
             }
         }
     }
@@ -146,7 +184,7 @@ struct OnboardingFlowView: View {
             Text(hint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text("지원 형식: PDF, PNG, JPEG, HEIC")
+            Text("이미지는 여러 장 선택 가능 · PDF는 한 번에 1개")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         } header: {
@@ -173,7 +211,7 @@ struct OnboardingFlowView: View {
             VStack(spacing: 12) {
                 ProgressView()
                     .controlSize(.large)
-                Text("문서 분석 중...")
+                Text(importOverlayMessage)
                     .font(.headline)
             }
             .padding(24)
@@ -197,8 +235,7 @@ struct OnboardingFlowView: View {
 
             if viewModel.isLastStep {
                 Button("완료") {
-                    viewModel.save(context: modelContext)
-                    dismiss()
+                    completeOnboarding()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.canProceedFromCurrentStep())
@@ -212,12 +249,31 @@ struct OnboardingFlowView: View {
         }
     }
 
+    private func completeOnboarding() {
+        let savedProfile = viewModel.save(context: modelContext)
+        onSaved?(savedProfile)
+
+        if mode == .create {
+            showCreateAnotherPrompt = true
+        } else {
+            dismiss()
+        }
+    }
+
+    private var importOverlayMessage: String {
+        if viewModel.importingFileCount > 1 {
+            "문서 \(viewModel.importingFileCount)개 분석 중..."
+        } else {
+            "문서 분석 중..."
+        }
+    }
+
     private func handleImportResult(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
+            guard !urls.isEmpty else { return }
             Task {
-                await viewModel.importDocument(from: url)
+                await viewModel.importDocuments(from: urls)
             }
         case .failure(let error):
             viewModel.importErrorMessage = error.localizedDescription

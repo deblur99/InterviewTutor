@@ -3,6 +3,7 @@ import SwiftData
 
 @Model
 final class CandidateProfile {
+    var profileID: UUID?
     var company: String
     var industry: String
     var role: String
@@ -20,6 +21,7 @@ final class CandidateProfile {
     var cachedQuestions: [CachedQuestion]
 
     init(
+        profileID: UUID? = nil,
         company: String = "",
         industry: String = "",
         role: String = "",
@@ -32,6 +34,7 @@ final class CandidateProfile {
         sessions: [InterviewSession] = [],
         cachedQuestions: [CachedQuestion] = []
     ) {
+        self.profileID = profileID
         self.company = company
         self.industry = industry
         self.role = role
@@ -52,5 +55,34 @@ final class CandidateProfile {
             && !jobDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !resumeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !coverLetterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func ensureProfileID() {
+        if profileID == nil {
+            profileID = UUID()
+        }
+    }
+
+    var displayTitle: String {
+        let companyName = company.trimmingCharacters(in: .whitespacesAndNewlines)
+        let roleName = role.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !companyName.isEmpty, !roleName.isEmpty {
+            return "\(companyName) · \(roleName)"
+        }
+        if !companyName.isEmpty {
+            return companyName
+        }
+        if !roleName.isEmpty {
+            return roleName
+        }
+        return "새 프로필"
+    }
+
+    var displaySubtitle: String {
+        let industryName = industry.trimmingCharacters(in: .whitespacesAndNewlines)
+        if industryName.isEmpty {
+            return isComplete ? "프로필 완료" : "입력 미완료"
+        }
+        return industryName
     }
 }

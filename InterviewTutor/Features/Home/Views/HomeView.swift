@@ -3,22 +3,27 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(ActiveProfileStore.self) private var activeProfileStore
+
     @Query(sort: \CandidateProfile.updatedAt, order: .reverse) private var profiles: [CandidateProfile]
 
     @State private var showOnboarding = false
+    @State private var showProfileManagement = false
     @State private var navigationPath = NavigationPath()
     @State private var poolRefillTask: Task<Void, Never>?
 
-    private var profile: CandidateProfile? { profiles.first }
+    private var activeProfile: CandidateProfile? {
+        activeProfileStore.activeProfile(in: profiles)
+    }
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
-                    if let profile {
-                        profileSummary(profile)
-                        stageSelection
+                    if let activeProfile {
+                        profileSummary(activeProfile)
+                        stageSelection(for: activeProfile)
                     } else {
                         emptyState
                     }
@@ -27,30 +32,25 @@ struct HomeView: View {
             }
             .navigationTitle("면접도우미")
             .toolbar {
-                if profile != nil {
+                if !profiles.isEmpty {
                     ToolbarItem {
-                        Button("프로필 수정") {
-                            showOnboarding = true
+                        Button("프로필 관리") {
+                            showProfileManagement = true
                         }
                     }
                 }
             }
-            .sheet(isPresented: $showOnboarding, onDismiss: {
-                guard let profile, profile.isComplete else { return }
-                poolRefillTask?.cancel()
-                poolRefillTask = Task {
-                    await QuestionPoolManager().ensurePoolFilled(profile: profile, context: modelContext)
-                }
-            }) {
-                if let profile {
-                    OnboardingFlowView(profile: profile)
-                } else {
-                    OnboardingFlowView()
+            .sheet(isPresented: $showOnboarding, onDismiss: handleOnboardingDismiss) {
+                OnboardingFlowView(mode: .create) { savedProfile in
+                    activeProfileStore.select(savedProfile)
                 }
             }
+            .sheet(isPresented: $showProfileManagement, onDismiss: handleOnboardingDismiss) {
+                ProfileManagementView()
+            }
             .navigationDestination(for: SessionStage.self) { stage in
-                if let profile {
-                    PreSessionView(profile: profile, stage: stage)
+                if let activeProfile {
+                    PreSessionView(profile: activeProfile, stage: stage)
                 }
             }
             .navigationDestination(for: InterviewSession.self) { session in
@@ -58,15 +58,17 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            if profile == nil {
+            profiles.forEach { $0.ensureProfileID() }
+            try? modelContext.save()
+            if profiles.isEmpty {
                 showOnboarding = true
             }
         }
         .task(id: poolRefillToken) {
-            guard let profile, profile.isComplete else { return }
+            guard let activeProfile, activeProfile.isComplete else { return }
             poolRefillTask?.cancel()
             poolRefillTask = Task {
-                await QuestionPoolManager().ensurePoolFilled(profile: profile, context: modelContext)
+                await QuestionPoolManager().ensurePoolFilled(profile: activeProfile, context: modelContext)
             }
         }
         .onDisappear {
@@ -75,15 +77,23 @@ struct HomeView: View {
     }
 
     private var poolRefillToken: String? {
-        guard let profile, profile.isComplete else { return nil }
-        return ProfileFingerprint.make(for: profile)
+        guard let activeProfile, activeProfile.isComplete else { return nil }
+        return "\(activeProfile.profileID?.uuidString ?? "")-\(ProfileFingerprint.make(for: activeProfile))"
+    }
+
+    private func handleOnboardingDismiss() {
+        guard let activeProfile, activeProfile.isComplete else { return }
+        poolRefillTask?.cancel()
+        poolRefillTask = Task {
+            await QuestionPoolManager().ensurePoolFilled(profile: activeProfile, context: modelContext)
+        }
     }
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("화상면접 연습")
                 .font(.largeTitle.bold())
-            Text("온보딩 정보를 바탕으로 단계별 면접 훈련을 진행합니다.")
+            Text("지원 회사별 프로필을 전환하며 단계별 면접 훈련을 진행합니다.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -94,7 +104,7 @@ struct HomeView: View {
         } description: {
             Text("지원 회사, 직무, 채용공고, 이력서 정보를 입력해 주세요.")
         } actions: {
-            Button("온보딩 시작") {
+            Button("프로필 추가") {
                 showOnboarding = true
             }
             .buttonStyle(.borderedProminent)
@@ -102,17 +112,40 @@ struct HomeView: View {
     }
 
     private func profileSummary(_ profile: CandidateProfile) -> some View {
-        GroupBox("지원 정보") {
-            VStack(alignment: .leading, spacing: 8) {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("현재 프로필")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                        Text(profile.displayTitle)
+                            .font(.title3.bold())
+                    }
+                    Spacer()
+                    if profiles.count > 1 {
+                        Button("전환") {
+                            showProfileManagement = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
                 LabeledContent("회사", value: profile.company)
                 LabeledContent("산업", value: profile.industry)
                 LabeledContent("직무", value: profile.role)
+
+                if profiles.count > 1 {
+                    Text("등록된 프로필 \(profiles.count)개")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var stageSelection: some View {
+    private func stageSelection(for profile: CandidateProfile) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("훈련 단계")
                 .font(.title2.bold())
@@ -120,13 +153,13 @@ struct HomeView: View {
             ForEach(SessionStage.allCases) { stage in
                 StageCard(
                     stage: stage,
-                    isEnabled: stage.isAvailableInMVP && (profile?.isComplete ?? false)
+                    isEnabled: stage.isAvailableInMVP && profile.isComplete
                 ) {
                     navigationPath.append(stage)
                 }
             }
 
-            if let profile, !profile.sessions.isEmpty {
+            if !profile.sessions.isEmpty {
                 Divider()
                     .padding(.vertical, 8)
                 Text("이전 세션")
@@ -137,8 +170,15 @@ struct HomeView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(session.stage.displayName)
-                                    .font(.headline)
+                                HStack(spacing: 8) {
+                                    Text(session.stage.displayName)
+                                        .font(.headline)
+                                    if let grade = session.overallGrade, let score = session.overallScore {
+                                        Text("\(grade.displayName) · \(score)점")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(grade.accentColor)
+                                    }
+                                }
                                 Text(session.date, style: .date)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -152,6 +192,13 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+
+            let scoredSessions = ProgressChartDataBuilder.scoredSessions(from: profile)
+            if scoredSessions.count >= 2 {
+                Divider()
+                    .padding(.vertical, 8)
+                ProgressChartView(sessions: scoredSessions)
             }
         }
     }
@@ -197,5 +244,6 @@ private struct StageCard: View {
 
 #Preview {
     HomeView()
+        .environment(ActiveProfileStore())
         .modelContainer(for: [CandidateProfile.self, InterviewSession.self, QuestionRecord.self, CachedQuestion.self], inMemory: true)
 }

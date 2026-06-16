@@ -14,6 +14,12 @@ final class QuestionRecord {
     var fillerWordCount: Int
     var aiFeedback: String
     var recommendedSeconds: Int
+    var speechScore: Int?
+    var contentScore: Int?
+    var postureScore: Int?
+    var gazeTowardCameraRatio: Double?
+    var faceDetectedRatio: Double?
+    var postureStabilityScore: Double?
 
     var session: InterviewSession?
 
@@ -34,6 +40,12 @@ final class QuestionRecord {
         fillerWordCount: Int = 0,
         aiFeedback: String = "",
         recommendedSeconds: Int = 45,
+        speechScore: Int? = nil,
+        contentScore: Int? = nil,
+        postureScore: Int? = nil,
+        gazeTowardCameraRatio: Double? = nil,
+        faceDetectedRatio: Double? = nil,
+        postureStabilityScore: Double? = nil,
         session: InterviewSession? = nil
     ) {
         self.questionID = questionID
@@ -47,6 +59,12 @@ final class QuestionRecord {
         self.fillerWordCount = fillerWordCount
         self.aiFeedback = aiFeedback
         self.recommendedSeconds = recommendedSeconds
+        self.speechScore = speechScore
+        self.contentScore = contentScore
+        self.postureScore = postureScore
+        self.gazeTowardCameraRatio = gazeTowardCameraRatio
+        self.faceDetectedRatio = faceDetectedRatio
+        self.postureStabilityScore = postureStabilityScore
         self.session = session
     }
 

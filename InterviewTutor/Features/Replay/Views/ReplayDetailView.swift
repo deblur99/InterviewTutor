@@ -45,10 +45,26 @@ struct ReplayDetailView: View {
     }
 
     private var header: some View {
-        HStack {
-            StageBadgeView(stage: session.stage)
-            Text(session.date, style: .date)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StageBadgeView(stage: session.stage)
+                Text(session.date, style: .date)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let overall = session.overallScore,
+               let grade = session.overallGrade,
+               let speech = session.speechScore,
+               let content = session.contentScore,
+               let posture = session.postureScore {
+                ScoreSummaryPanel(
+                    overallScore: overall,
+                    grade: grade,
+                    speechScore: speech,
+                    contentScore: content,
+                    postureScore: posture
+                )
+            }
         }
     }
 

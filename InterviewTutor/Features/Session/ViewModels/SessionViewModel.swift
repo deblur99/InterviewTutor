@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Foundation
 import SwiftData
 import SwiftUI
@@ -19,11 +20,16 @@ final class SessionViewModel {
     private(set) var errorMessage: String?
     private(set) var completedSession: InterviewSession?
 
+    let coachMonitor = SessionCoachMonitor()
+    private let hudController = PrompterHUDController()
+
     private let cameraManager = CameraManager()
     private let interviewerVoice = InterviewerVoice()
     private let speechRecognizer = SpeechRecognizer()
     private let questionPoolManager = QuestionPoolManager()
     private let feedbackGenerator = FeedbackGenerator()
+    private let segmentVisionAnalyzer = SegmentVisionAnalyzer()
+    private let contentScorer = ContentScorer()
 
     private var timerTask: Task<Void, Never>?
     private var sessionID = UUID()
@@ -46,6 +52,39 @@ final class SessionViewModel {
         currentQuestion?.promptKeywords
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+    }
+
+    var isCoachEnabled: Bool {
+        get { coachMonitor.isCoachEnabled }
+        set { coachMonitor.setCoachEnabled(newValue) }
+    }
+
+    var isHUDEnabled: Bool {
+        get { coachMonitor.isHUDEnabled }
+        set { coachMonitor.setHUDEnabled(newValue) }
+    }
+
+    var activeCoachHint: CoachHint? {
+        guard isCoachEnabled else { return nil }
+        return coachMonitor.activeHint
+    }
+
+    var hudState: PrompterHUDState {
+        PrompterHUDState(
+            isVisible: coachMonitor.isHUDEnabled && stage == .beginner && phase.isAnsweringPhase,
+            keywords: currentKeywords,
+            fillerCount: coachMonitor.liveFillerCount,
+            keywordCoveragePercent: coachMonitor.keywordCoveragePercent,
+            gazePercent: coachMonitor.gazePercent
+        )
+    }
+
+    func updateHUD(anchorWindow: NSWindow?) {
+        hudController.update(state: hudState, anchorWindow: anchorWindow)
+    }
+
+    func hideHUD() {
+        hudController.hide()
     }
 
     func clearError() {
@@ -90,9 +129,36 @@ final class SessionViewModel {
             try await cameraManager.configure()
             try await cameraManager.startSession()
             previewLayer = await cameraManager.makePreviewLayer()
+            await configureLiveCoach()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func configureLiveCoach() async {
+        let speechAuthorized = await speechRecognizer.requestAuthorization()
+        coachMonitor.configure(
+            speechAuthorized: speechAuthorized,
+            defaultHUDEnabled: stage == .beginner
+        )
+
+        let monitor = coachMonitor
+        await cameraManager.setSampleHandlers(
+            onVideo: { sampleBuffer in
+                monitor.processVideoSample(sampleBuffer)
+            },
+            onAudio: { sampleBuffer in
+                monitor.processAudioSample(sampleBuffer)
+            }
+        )
+    }
+
+    private func beginAnswerMonitoring() async {
+        await coachMonitor.startAnswering(keywords: currentKeywords)
+    }
+
+    private func endAnswerMonitoring() async {
+        await coachMonitor.stopAnswering()
     }
 
     func startSession() async {
@@ -122,8 +188,10 @@ final class SessionViewModel {
 
         phase = .selfIntro
         await cameraManager.markSegmentStart(questionID: questionID)
+        await beginAnswerMonitoring()
         startTimer(duration: TimeInterval(question.recommendedSeconds))
         await waitForTimerCompletion(extraGrace: 2)
+        await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
         if questionFlow.advance() {
@@ -143,8 +211,10 @@ final class SessionViewModel {
 
             phase = .answering
             await cameraManager.markSegmentStart(questionID: questionID)
+            await beginAnswerMonitoring()
             startTimer(duration: TimeInterval(question.recommendedSeconds))
             await waitForTimerCompletion(extraGrace: 5)
+            await endAnswerMonitoring()
             _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
             if !questionFlow.advance() { break }
@@ -164,8 +234,10 @@ final class SessionViewModel {
 
         phase = .closing
         await cameraManager.markSegmentStart(questionID: questionID)
+        await beginAnswerMonitoring()
         startTimer(duration: TimeInterval(question.recommendedSeconds))
         await waitForTimerCompletion(extraGrace: 10)
+        await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
         await finishSession()
@@ -200,6 +272,8 @@ final class SessionViewModel {
     }
 
     private func finishSession() async {
+        await endAnswerMonitoring()
+        hideHUD()
         phase = .analyzing
         isAnalyzing = true
 
@@ -220,33 +294,69 @@ final class SessionViewModel {
         for (index, record) in questions.enumerated() {
             analysisProgress = "답변 분석 중 (\(index + 1)/\(questions.count))..."
 
-            guard speechAuthorized,
-                  let segment = segments.first(where: { $0.questionID == record.questionID }),
+            guard let segment = segments.first(where: { $0.questionID == record.questionID }),
                   segment.duration > 0.5 else { continue }
 
-            do {
-                let transcript = try await speechRecognizer.transcribeSegment(
-                    from: recordedURL,
-                    startTime: segment.startTime,
-                    endTime: segment.endTime
-                )
-                record.transcribedAnswer = transcript
-                let fillerReport = FillerWordAnalyzer.analyze(transcript)
-                record.fillerWordCount = fillerReport.totalCount
-                record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(record, fillerReport: fillerReport)
-            } catch {
-                record.aiFeedback = "음성 인식에 실패했습니다. 마이크 설정을 확인해 주세요."
+            async let visionTask = segmentVisionAnalyzer.analyzeSegment(
+                videoURL: recordedURL,
+                startTime: segment.startTime,
+                endTime: segment.endTime
+            )
+
+            var transcript = ""
+            var fillerCount = 0
+
+            if speechAuthorized {
+                do {
+                    transcript = try await speechRecognizer.transcribeSegment(
+                        from: recordedURL,
+                        startTime: segment.startTime,
+                        endTime: segment.endTime
+                    )
+                    record.transcribedAnswer = transcript
+                    let fillerReport = FillerWordAnalyzer.analyze(transcript)
+                    fillerCount = fillerReport.totalCount
+                    record.fillerWordCount = fillerCount
+                    record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(record, fillerReport: fillerReport)
+                } catch {
+                    record.aiFeedback = "음성 인식에 실패했습니다. 마이크 설정을 확인해 주세요."
+                }
             }
+
+            let postureMetrics = await visionTask
+            let duration = segment.duration
+            let speechScore = SpeechScorer.score(
+                transcript: transcript,
+                fillerCount: fillerCount,
+                duration: duration,
+                recommendedSeconds: record.recommendedSeconds
+            )
+            let contentScore = await contentScorer.score(question: record, transcript: transcript)
+            let postureScore = PostureScorer.score(metrics: postureMetrics)
+
+            SessionScoringEngine.applyQuestionScores(
+                to: record,
+                speechScore: speechScore,
+                contentScore: contentScore,
+                postureScore: postureScore,
+                metrics: postureMetrics
+            )
         }
 
+        let sessionIndex = profile.sessions.count + 1
         let session = InterviewSession(
             stage: stage,
             videoFilePath: VideoStorageManager.relativePath(for: recordedURL),
             expectedQuestionCount: questionFlow.totalCount,
             expectedDurationSeconds: questionFlow.expectedDurationSeconds,
+            sessionIndex: sessionIndex,
             profile: profile,
             questions: questions
         )
+
+        if let summary = SessionScoringEngine.summarize(questions: questions) {
+            SessionScoringEngine.applySessionScores(to: session, summary: summary)
+        }
 
         profile.sessions.append(session)
         if let modelContext {
@@ -291,6 +401,9 @@ final class SessionViewModel {
         }
         timerTask?.cancel()
         interviewerVoice.stop()
+        await endAnswerMonitoring()
+        hideHUD()
+        await cameraManager.setSampleHandlers()
         await cameraManager.stopRecording()
         await cameraManager.stopSession()
     }

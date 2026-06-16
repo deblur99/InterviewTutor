@@ -8,6 +8,12 @@ final class InterviewSession {
     var videoFilePath: String
     var expectedQuestionCount: Int
     var expectedDurationSeconds: Int
+    var speechScore: Int?
+    var contentScore: Int?
+    var postureScore: Int?
+    var overallScore: Int?
+    var overallGradeRawValue: String?
+    var sessionIndex: Int?
 
     var profile: CandidateProfile?
 
@@ -19,12 +25,26 @@ final class InterviewSession {
         set { stageRawValue = newValue.rawValue }
     }
 
+    var overallGrade: LetterGrade? {
+        get {
+            guard let raw = overallGradeRawValue else { return nil }
+            return LetterGrade(rawValue: raw)
+        }
+        set { overallGradeRawValue = newValue?.rawValue }
+    }
+
     init(
         stage: SessionStage = .beginner,
         date: Date = .now,
         videoFilePath: String = "",
         expectedQuestionCount: Int = 0,
         expectedDurationSeconds: Int = 0,
+        speechScore: Int? = nil,
+        contentScore: Int? = nil,
+        postureScore: Int? = nil,
+        overallScore: Int? = nil,
+        overallGrade: LetterGrade? = nil,
+        sessionIndex: Int? = nil,
         profile: CandidateProfile? = nil,
         questions: [QuestionRecord] = []
     ) {
@@ -33,6 +53,12 @@ final class InterviewSession {
         self.videoFilePath = videoFilePath
         self.expectedQuestionCount = expectedQuestionCount
         self.expectedDurationSeconds = expectedDurationSeconds
+        self.speechScore = speechScore
+        self.contentScore = contentScore
+        self.postureScore = postureScore
+        self.overallScore = overallScore
+        self.overallGradeRawValue = overallGrade?.rawValue
+        self.sessionIndex = sessionIndex
         self.profile = profile
         self.questions = questions
     }

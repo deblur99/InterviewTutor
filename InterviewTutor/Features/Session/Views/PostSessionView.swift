@@ -17,6 +17,7 @@ struct PostSessionView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                scorePanel
                 summaryCards
                 questionFeedbacks
                 doneButton
@@ -37,6 +38,32 @@ struct PostSessionView: View {
             Text("수고하셨습니다!")
                 .font(.largeTitle.bold())
         }
+    }
+
+    private var scorePanel: some View {
+        Group {
+            if let overall = session.overallScore,
+               let grade = session.overallGrade,
+               let speech = session.speechScore,
+               let content = session.contentScore,
+               let posture = session.postureScore {
+                ScoreSummaryPanel(
+                    overallScore: overall,
+                    grade: grade,
+                    speechScore: speech,
+                    contentScore: content,
+                    postureScore: posture,
+                    postureWarning: postureWarning
+                )
+            }
+        }
+    }
+
+    private var postureWarning: String? {
+        let ratios = session.sortedQuestions.compactMap(\.faceDetectedRatio)
+        guard !ratios.isEmpty else { return nil }
+        let average = ratios.reduce(0, +) / Double(ratios.count)
+        return average < 0.3 ? "카메라·조명을 확인하고 얼굴이 잘 보이도록 연습해 보세요." : nil
     }
 
     private var summaryCards: some View {
@@ -108,6 +135,11 @@ private struct QuestionFeedbackCard: View {
                     .padding(.vertical, 3)
                     .background(.blue.opacity(0.12), in: Capsule())
                 Spacer()
+                QuestionScoreBadges(
+                    speechScore: question.speechScore,
+                    contentScore: question.contentScore,
+                    postureScore: question.postureScore
+                )
                 if question.fillerWordCount > 0 {
                     Text("필러 \(question.fillerWordCount)회")
                         .font(.caption2)

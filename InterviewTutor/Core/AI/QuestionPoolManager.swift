@@ -29,6 +29,7 @@ final class QuestionPoolManager {
         guard profile.isComplete else { return }
 
         invalidatePoolIfNeeded(profile: profile, context: context)
+        purgeInvalidCachedQuestions(profile: profile, context: context)
 
         let fingerprint = ProfileFingerprint.make(for: profile)
         let unusedCount = unusedQuestions(for: profile, fingerprint: fingerprint).count
@@ -49,6 +50,7 @@ final class QuestionPoolManager {
         context: ModelContext
     ) async -> SessionQuestionSet {
         invalidatePoolIfNeeded(profile: profile, context: context)
+        purgeInvalidCachedQuestions(profile: profile, context: context)
 
         let fingerprint = ProfileFingerprint.make(for: profile)
         var available = unusedQuestions(for: profile, fingerprint: fingerprint)
@@ -108,7 +110,26 @@ final class QuestionPoolManager {
         fingerprint: String
     ) -> [CachedQuestion] {
         profile.cachedQuestions
-            .filter { $0.profileFingerprint == fingerprint && $0.status == .unused }
+            .filter {
+                $0.profileFingerprint == fingerprint
+                    && $0.status == .unused
+                    && InterviewQuestionValidator.isValidQuestionText($0.questionText)
+            }
             .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private func purgeInvalidCachedQuestions(profile: CandidateProfile, context: ModelContext) {
+        let invalid = profile.cachedQuestions.filter {
+            !InterviewQuestionValidator.isValidQuestionText($0.questionText)
+        }
+        guard !invalid.isEmpty else { return }
+
+        for cached in invalid {
+            context.delete(cached)
+        }
+        profile.cachedQuestions.removeAll { cached in
+            invalid.contains { $0.questionID == cached.questionID }
+        }
+        try? context.save()
     }
 }

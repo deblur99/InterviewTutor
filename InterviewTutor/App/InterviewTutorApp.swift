@@ -26,5 +26,30 @@ struct InterviewTutorApp: App {
         }
         .modelContainer(sharedModelContainer)
         .defaultSize(width: 1100, height: 750)
+        .commands {
+            InterviewTutorAppCommands()
+        }
+
+        Window("About InterviewTutor", id: AboutView.windowID) {
+            AboutView()
+        }
+        .defaultSize(
+            width: AboutView.preferredWidth,
+            height: AboutView.preferredHeight
+        )
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+    }
+}
+
+private struct InterviewTutorAppCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About InterviewTutor") {
+                openWindow(id: AboutView.windowID)
+            }
+        }
     }
 }

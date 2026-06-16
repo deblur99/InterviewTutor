@@ -160,9 +160,20 @@ private struct ProfileRow: View {
                         Text(profile.displayTitle)
                             .font(.headline)
                             .foregroundStyle(.primary)
-                        Text(profile.displaySubtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            Text(profile.displaySubtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if let countdown = profile.interviewCountdown, countdown.isActive {
+                                Text("·")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                Text(countdown.headline)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(InterviewCountdownStyle.accentColor(for: countdown))
+                            }
+                        }
                         HStack(spacing: 8) {
                             Label("\(profile.sessions.count)회 연습", systemImage: "video")
                             if profile.isComplete {

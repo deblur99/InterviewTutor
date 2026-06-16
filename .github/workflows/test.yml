@@ -20,12 +20,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Import signing certificate
+        uses: ./.github/actions/import-signing-certificate
+        with:
+          certificate-p12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          certificate-password: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+
       - name: Show toolchain
         run: |
           xcodebuild -version
           sw_vers
 
       - name: Run unit tests
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           xcodebuild test \
@@ -33,9 +41,14 @@ jobs:
             -scheme "$SCHEME" \
             -destination 'platform=macOS' \
             -only-testing:InterviewTutorTests \
-            -resultBundlePath UnitTestResults.xcresult
+            -resultBundlePath UnitTestResults.xcresult \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Run UI tests
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           xcodebuild test \
@@ -43,7 +56,10 @@ jobs:
             -scheme "$SCHEME" \
             -destination 'platform=macOS' \
             -only-testing:InterviewTutorUITests \
-            -resultBundlePath UITestResults.xcresult
+            -resultBundlePath UITestResults.xcresult \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Upload test results
         if: always()
@@ -54,3 +70,10 @@ jobs:
             UnitTestResults.xcresult
             UITestResults.xcresult
           if-no-files-found: ignore
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi

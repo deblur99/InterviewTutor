@@ -14,6 +14,7 @@ final class InterviewSession {
     var overallScore: Int?
     var overallGradeRawValue: String?
     var sessionIndex: Int?
+    var summaryFeedback: String?
 
     var profile: CandidateProfile?
 
@@ -45,6 +46,7 @@ final class InterviewSession {
         overallScore: Int? = nil,
         overallGrade: LetterGrade? = nil,
         sessionIndex: Int? = nil,
+        summaryFeedback: String? = nil,
         profile: CandidateProfile? = nil,
         questions: [QuestionRecord] = []
     ) {
@@ -59,6 +61,7 @@ final class InterviewSession {
         self.overallScore = overallScore
         self.overallGradeRawValue = overallGrade?.rawValue
         self.sessionIndex = sessionIndex
+        self.summaryFeedback = summaryFeedback
         self.profile = profile
         self.questions = questions
     }

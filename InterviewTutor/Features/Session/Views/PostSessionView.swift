@@ -17,6 +17,9 @@ struct PostSessionView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
+                if let summary = session.summaryFeedback, !summary.isEmpty {
+                    summaryFeedbackSection(summary)
+                }
                 scorePanel
                 summaryCards
                 questionFeedbacks
@@ -37,6 +40,18 @@ struct PostSessionView: View {
             }
             Text("수고하셨습니다!")
                 .font(.largeTitle.bold())
+        }
+    }
+
+    private func summaryFeedbackSection(_ summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("종합 피드백")
+                .font(.title3.bold())
+            Text(summary)
+                .font(.body)
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -72,6 +87,7 @@ struct PostSessionView: View {
             SummaryCard(title: "필러워드", value: "\(totalFillerWords)회", icon: "text.word.spacing")
             SummaryCard(title: "소요 시간", value: formatDuration(totalDuration), icon: "clock")
         }
+        .padding()
     }
 
     private var questionFeedbacks: some View {

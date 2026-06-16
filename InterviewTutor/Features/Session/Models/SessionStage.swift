@@ -24,6 +24,29 @@ enum SessionStage: String, Codable, CaseIterable, Identifiable {
     }
 
     var isAvailableInMVP: Bool {
+        isAvailable
+    }
+
+    var isAvailable: Bool {
+        switch self {
+        case .beginner, .skilled: true
+        case .expert: false
+        }
+    }
+
+    var preset: SessionStagePreset {
+        SessionStagePreset.preset(for: self)
+    }
+
+    var showsFullPrompter: Bool {
+        self == .beginner
+    }
+
+    var coachEnabledByDefault: Bool {
+        self == .beginner
+    }
+
+    var coachHUDEnabledByDefault: Bool {
         self == .beginner
     }
 }

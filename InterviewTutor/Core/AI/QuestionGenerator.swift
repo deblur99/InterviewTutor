@@ -18,6 +18,16 @@ struct GeneratedQuestionItem {
 }
 
 @Generable
+struct GeneratedBehavioralQuestionSet {
+    var questions: [GeneratedQuestionItem]
+}
+
+@Generable
+struct GeneratedCompanyQuestionSet {
+    var questions: [GeneratedQuestionItem]
+}
+
+@Generable
 struct GeneratedFeedbackSet {
     var feedbacks: [GeneratedFeedbackItem]
 }
@@ -44,25 +54,116 @@ final class QuestionGenerator {
         return fallbackQuestions(for: profile, count: count)
     }
 
-    func buildFullQuestionSet(documentQuestions: [GeneratedQuestion]) -> [GeneratedQuestion] {
+    func buildFullQuestionSet(
+        documentQuestions: [GeneratedQuestion],
+        stage: SessionStage = .beginner
+    ) -> [GeneratedQuestion] {
+        switch stage {
+        case .beginner:
+            return buildBeginnerQuestionSet(documentQuestions: documentQuestions)
+        case .skilled, .expert:
+            return documentQuestions
+        }
+    }
+
+    func buildBeginnerQuestionSet(documentQuestions: [GeneratedQuestion]) -> [GeneratedQuestion] {
         var result: [GeneratedQuestion] = []
 
         result.append(GeneratedQuestion(
-            id: UUID(),
             questionText: "1분 이내로 자기소개를 해 주세요.",
             promptKeywords: "이름, 경력, 지원동기, 강점",
-            recommendedSeconds: 60
+            recommendedSeconds: 60,
+            category: .selfIntro
         ))
 
-        result.append(contentsOf: documentQuestions)
+        result.append(contentsOf: documentQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: $0.recommendedSeconds,
+                category: .documentBased
+            )
+        })
+
         result.append(GeneratedQuestion(
-            id: UUID(),
             questionText: "마지막으로 하고 싶은 말씀이 있으시면 해 주세요.",
             promptKeywords: "감사, 열정, 회사 관심",
-            recommendedSeconds: 60
+            recommendedSeconds: 60,
+            category: .closing
         ))
 
         return result
+    }
+
+    func buildSkilledQuestionSet(
+        documentQuestions: [GeneratedQuestion],
+        behavioralQuestions: [GeneratedQuestion],
+        companyQuestions: [GeneratedQuestion]
+    ) -> [GeneratedQuestion] {
+        var result: [GeneratedQuestion] = []
+
+        result.append(GeneratedQuestion(
+            questionText: "1분 이내로 자기소개를 해 주세요.",
+            promptKeywords: "이름, 경력, 지원동기, 강점",
+            recommendedSeconds: 60,
+            category: .selfIntro
+        ))
+
+        result.append(contentsOf: documentQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: $0.recommendedSeconds,
+                category: .documentBased
+            )
+        })
+
+        result.append(contentsOf: behavioralQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: max($0.recommendedSeconds, 75),
+                category: .behavioral
+            )
+        })
+
+        result.append(contentsOf: companyQuestions.map {
+            GeneratedQuestion(
+                id: $0.id,
+                questionText: $0.questionText,
+                promptKeywords: $0.promptKeywords,
+                recommendedSeconds: $0.recommendedSeconds,
+                category: .companyFit
+            )
+        })
+
+        result.append(GeneratedQuestion(
+            questionText: "마지막으로 하고 싶은 말씀이 있으시면 해 주세요.",
+            promptKeywords: "감사, 열정, 회사 관심",
+            recommendedSeconds: 60,
+            category: .closing
+        ))
+
+        return result
+    }
+
+    func generateBehavioralQuestions(for profile: CandidateProfile, count: Int) async -> [GeneratedQuestion] {
+        if case .available = model.availability,
+           let generated = await generateBehavioralWithFoundationModels(profile: profile, count: count) {
+            return generated
+        }
+        return behavioralFallbackQuestions(for: profile, count: count)
+    }
+
+    func generateCompanyQuestions(for profile: CandidateProfile, count: Int) async -> [GeneratedQuestion] {
+        if case .available = model.availability,
+           let generated = await generateCompanyWithFoundationModels(profile: profile, count: count) {
+            return generated
+        }
+        return companyFallbackQuestions(for: profile, count: count)
     }
 
     private func generateWithFoundationModels(
@@ -108,12 +209,13 @@ final class QuestionGenerator {
             let response = try await session.respond(to: prompt, generating: GeneratedQuestionSet.self)
 
             let generated = response.content.questions.map { item in
-                GeneratedQuestion(
-                    id: UUID(),
-                    questionText: item.questionText,
-                    promptKeywords: item.promptKeywords,
-                    recommendedSeconds: min(max(item.recommendedSeconds, 30), 60)
-                )
+            GeneratedQuestion(
+                id: UUID(),
+                questionText: item.questionText,
+                promptKeywords: item.promptKeywords,
+                recommendedSeconds: min(max(item.recommendedSeconds, 30), 60),
+                category: .documentBased
+            )
             }
 
             let valid = generated.filter { InterviewQuestionValidator.isValidQuestionText($0.questionText) }
@@ -171,7 +273,8 @@ final class QuestionGenerator {
                 id: UUID(),
                 questionText: ResumeTopicExtractor.question(from: topic),
                 promptKeywords: "역할, 성과, 기술, 협업",
-                recommendedSeconds: 45
+                recommendedSeconds: 45,
+                category: .documentBased
             )
         }
     }
@@ -198,7 +301,112 @@ final class QuestionGenerator {
                 id: UUID(),
                 questionText: text,
                 promptKeywords: "경험, 역할, 성과, 배운점",
-                recommendedSeconds: 45
+                recommendedSeconds: 45,
+                category: .documentBased
+            )
+        }
+    }
+
+    private func generateBehavioralWithFoundationModels(
+        profile: CandidateProfile,
+        count: Int
+    ) async -> [GeneratedQuestion]? {
+        do {
+            let session = LanguageModelSession(instructions: """
+            인성·상황 면접 질문을 생성합니다. STAR(상황-과제-행동-결과) 답변을 유도하세요.
+            이론·정의 질문은 금지합니다.
+            """)
+
+            let prompt = """
+            [회사] \(profile.company)
+            [산업] \(profile.industry)
+            [직무] \(profile.role)
+            인성·상황 질문 \(count)개를 생성하세요.
+            """
+
+            let response = try await session.respond(to: prompt, generating: GeneratedBehavioralQuestionSet.self)
+            let questions = response.content.questions.compactMap { item -> GeneratedQuestion? in
+                guard InterviewQuestionValidator.isValidQuestionText(item.questionText) else { return nil }
+                return GeneratedQuestion(
+                    questionText: item.questionText,
+                    promptKeywords: item.promptKeywords.isEmpty ? "상황, 과제, 행동, 결과, STAR" : item.promptKeywords,
+                    recommendedSeconds: min(max(item.recommendedSeconds, 60), 90),
+                    category: .behavioral
+                )
+            }
+            return questions.count >= count ? Array(questions.prefix(count)) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func behavioralFallbackQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "팀원과 의견이 충돌했던 상황을 STAR 구조로 설명해 주세요.",
+            "예상치 못한 문제가 발생했을 때 어떻게 대응했는지 구체적으로 말씀해 주세요.",
+            "리더십을 발휘해야 했던 경험과 그 결과를 설명해 주세요.",
+            "실패했던 경험과 그로부터 무엇을 배웠는지 말씀해 주세요.",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "상황, 과제, 행동, 결과, STAR",
+                recommendedSeconds: 90,
+                category: .behavioral
+            )
+        }
+    }
+
+    private func generateCompanyWithFoundationModels(
+        profile: CandidateProfile,
+        count: Int
+    ) async -> [GeneratedQuestion]? {
+        do {
+            let session = LanguageModelSession(instructions: """
+            지원 회사·산업·직무에 맞는 면접 질문을 생성합니다.
+            채용공고와 이력서 맥락만 사용하고, 외부 추측은 하지 마세요.
+            """)
+
+            let prompt = """
+            [회사] \(profile.company)
+            [산업] \(profile.industry)
+            [직무] \(profile.role)
+            [채용공고]
+            \(profile.jobDescription.prefix(1500))
+
+            회사·직무 맞춤 질문 \(count)개를 생성하세요.
+            """
+
+            let response = try await session.respond(to: prompt, generating: GeneratedCompanyQuestionSet.self)
+            let questions = response.content.questions.compactMap { item -> GeneratedQuestion? in
+                guard InterviewQuestionValidator.isValidQuestionText(item.questionText) else { return nil }
+                return GeneratedQuestion(
+                    questionText: item.questionText,
+                    promptKeywords: item.promptKeywords.isEmpty ? "회사, 직무, 기여, 동기" : item.promptKeywords,
+                    recommendedSeconds: min(max(item.recommendedSeconds, 45), 60),
+                    category: .companyFit
+                )
+            }
+            return questions.count >= count ? Array(questions.prefix(count)) : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func companyFallbackQuestions(for profile: CandidateProfile, count: Int) -> [GeneratedQuestion] {
+        let templates = [
+            "\(profile.company)에 지원한 구체적인 이유와 입사 후 기여하고 싶은 점을 말씀해 주세요.",
+            "\(profile.industry) 산업에서 \(profile.role) 직무가 중요한 이유를 본인 관점에서 설명해 주세요.",
+            "채용공고의 핵심 요구 역량 중 본인 경험과 가장 연결되는 부분을 설명해 주세요.",
+        ]
+
+        return templates.prefix(count).map { text in
+            GeneratedQuestion(
+                questionText: text,
+                promptKeywords: "회사, 직무, 기여, 동기",
+                recommendedSeconds: 60,
+                category: .companyFit
             )
         }
     }

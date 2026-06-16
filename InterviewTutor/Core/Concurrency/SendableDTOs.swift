@@ -31,4 +31,19 @@ struct GeneratedQuestion: Sendable, Identifiable {
     let questionText: String
     let promptKeywords: String
     let recommendedSeconds: Int
+    var category: QuestionCategory
+
+    init(
+        id: UUID = UUID(),
+        questionText: String,
+        promptKeywords: String,
+        recommendedSeconds: Int,
+        category: QuestionCategory = .documentBased
+    ) {
+        self.id = id
+        self.questionText = questionText
+        self.promptKeywords = promptKeywords
+        self.recommendedSeconds = recommendedSeconds
+        self.category = category
+    }
 }

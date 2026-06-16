@@ -2,7 +2,9 @@
 
 이 문서는 MVP 이후의 개발 방향을 정리합니다. 우선순위와 일정은 피드백에 따라 조정될 수 있습니다.
 
-## 현재 상태 (MVP · 1단계)
+## 현재 상태 (v1.1)
+
+**Phase 0~4와 v1.1 확장 기능(자유 연습·면접 일정·모의면접 기록·About)까지 구현 완료.** 다음 초점은 Phase 5(품질·배포)입니다.
 
 ### 완료된 항목
 
@@ -12,7 +14,7 @@
 - [x] Foundation Models 텍스트 다듬기 + 가드레일 fallback
 - [x] 채용공고 필수 섹션 검증
 - [x] 서류 기반 면접 질문 생성 (Foundation Models + fallback)
-- [x] 질문 풀 선생성 및 세션 시작 시간 최적화
+- [x] 질문 풀 선생성 및 세션 시작 시간 최적화 (갓·숙련·전문 단계별)
 - [x] PreSession → Session → PostSession 상태 머신
 - [x] 카메라 프리뷰·세션 녹화·질문별 세그먼트
 - [x] 면접관 TTS + 타이머 워크플로우
@@ -25,16 +27,22 @@
 - [x] **Phase 4 — 실시간 코치** (아래 참고)
 - [x] **Phase 2 — 숙련 단계** (아래 참고)
 - [x] **Phase 3 — 전문 단계** (아래 참고)
+- [x] **자유 연습** — 항목 다중 선택, 문항별·종합 피드백, 이직 사유 항목 (아래 참고)
+- [x] **면접 일정** — D-Day 카운트다운, 준비 팁, 로컬 알림 (아래 참고)
+- [x] **모의면접 기록** — 홈 요약 카드, 히스토리 시트 (아래 참고)
+- [x] **About** — 시스템 메뉴 About 창, GitHub·개인정보처리방침·연락처 링크
+- [x] **Release entitlements** — App Store 샌드박스·알림 권한
+- [x] **CI** — GitHub Actions 단위·UI 테스트 (`macos-26`)
 
 ### 알려진 제한
 
 - 프로필별 질문 풀·세션은 분리되어 있으나, 프로필 간 이력서/자소서 **공유 복사** 기능은 없음
-- 실시간 코치·HUD는 **갓 연습(beginner)** 세션에 최적화 — 숙련·전문 단계는 코치·HUD 기본 off, 프롬프터 축소
+- 실시간 코치·HUD는 **갓 연습(beginner)** 세션에 최적화 — 숙련·전문 단계는 코치·HUD 기본 off, 프롬프터 힌트 축소
 - Foundation Models 미지원 환경에서는 규칙 기반 fallback 질문·피드백 사용
 
 ---
 
-## Phase 4 — 실시간 피드백 & 프롬프터 ✅ (우선 구현 완료)
+## Phase 4 — 실시간 피드백 & 프롬프터 ✅
 
 **목표:** 답변 중에도 보조 정보를 제공하되, 실전 부정행위 방지 설계 유지
 
@@ -100,17 +108,60 @@
 
 ---
 
+## v1.1 확장 — 자유 연습 ✅
+
+**목표:** 구조화 단계와 별도로, 원하는 항목만 골라 집중 훈련
+
+### 기능
+
+- [x] `SessionStage.freePractice` — 홈에서 자유 연습 진입
+- [x] 항목 다중 선택 (`PracticeTopic`, `practiceOrder` 고정 순서)
+- [x] 문항 수 1~10 (기본 2), 라운드로빈 주제 배치
+- [x] 이직 사유 전용 질문 (`careerChangeReason`)
+- [x] 문항별 피드백 시트 + 종합 피드백 (`FreePracticeViewModel`)
+- [x] 옵션 변경 디바운스 — 불필요한 질문 재생성 방지
+
+---
+
+## v1.1 확장 — 면접 일정 ✅
+
+**목표:** 면접 D-Day 카운트다운과 준비 리마인더
+
+### 기능
+
+- [x] 프로필별 면접 일시 저장 (`CandidateProfile.interviewDate`)
+- [x] 홈 카운트다운 카드·편집 시트 (`InterviewScheduleCard`, `InterviewScheduleEditorSheet`)
+- [x] D-7~D-1 준비 팁 카드 (`InterviewPrepGuide`, `InterviewPrepTipsCard`)
+- [x] 로컬 알림 — D-7~D-1 09:00, D-Day 06:00 (`InterviewNotificationScheduler`)
+- [x] 프로필 관리 화면 D-Day 표시
+
+---
+
+## v1.1 확장 — 모의면접 기록 ✅
+
+**목표:** 홈에서 연습 이력을 한눈에 보고 상세 기록으로 이동
+
+### 기능
+
+- [x] 프로필 세션 통계 집계 (`ProfileSessionStats`)
+- [x] 홈 요약 카드 — 최근 점수·등급, 최근 3회 (`ProfileSessionSummaryCard`)
+- [x] 히스토리 시트 — 차트 + 역대 세션 목록 (`ProfileSessionHistorySheet`)
+
+---
+
 ## Phase 5 — 품질·배포
 
 ### 품질
 
-- [ ] UI 테스트 (온보딩 → 세션 → 다시보기 E2E)
+- [x] GitHub Actions CI — 단위·UI 테스트 (`test.yml`)
+- [ ] UI 테스트 E2E 시나리오 확대 (온보딩 → 세션 → 다시보기)
 - [ ] SwiftData 버전 마이그레이션 전략 (`VersionedSchema`)
 - [ ] 접근성 (VoiceOver, 키보드 내비게이션)
 - [ ] 다국어 지원 검토 (현재 UI·질문 한국어 중심)
 
 ### 배포
 
+- [x] Release entitlements
 - [ ] 앱 아이콘·스크린샷·App Store 메타데이터
 - [ ] TestFlight / Mac App Store 심사 대응
 - [ ] 크래시·성능 모니터링 (옵션)
@@ -119,12 +170,12 @@
 
 ## 아키텍처 개선 (지속)
 
-| 항목 | 설명 |
-|------|------|
-| 질문 풀 | 단계·카테고리별 풀 분리, LRU 교체 정책 |
-| FM 가드레일 | 청크 분할·permissive transform·섹션 보존 fallback 고도화 |
-| 테스트 | `QuestionPoolManager`, `QuestionGenerator` fallback 단위 테스트 확대 |
-| 모듈화 | Core/Features 경계 유지, 재사용 가능한 InterviewEngine 추출 검토 |
+| 항목        | 설명                                                                 |
+| ----------- | -------------------------------------------------------------------- |
+| 질문 풀     | 단계·카테고리별 풀 분리, LRU 교체 정책                               |
+| FM 가드레일 | 청크 분할·permissive transform·섹션 보존 fallback 고도화             |
+| 테스트      | `QuestionPoolManager`, `QuestionGenerator` fallback 단위 테스트 확대 |
+| 모듈화      | Core/Features 경계 유지, 재사용 가능한 InterviewEngine 추출 검토     |
 
 ---
 
@@ -139,7 +190,9 @@
    ↓
 [완료] Phase 3 — 전문/실전 모드
    ↓
-[다음] Phase 5 — 테스트·배포
+[완료] v1.1 — 자유 연습, 면접 일정, 모의면접 기록, About
+   ↓
+[다음] Phase 5 — 배포·품질 고도화
 ```
 
 피드백이나 우선순위 변경 제안은 [GitHub Issues](https://github.com/deblur99/InterviewTutor/issues)에 남겨 주세요.

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 로컬 릴리스용 스크립트입니다.
+# CI/CD는 .github/workflows/release.yml (macos-26 runner)을 사용하세요.
 set -euo pipefail
 
 VERSION="${1:?Usage: ./scripts/publish-release.sh <version>}"

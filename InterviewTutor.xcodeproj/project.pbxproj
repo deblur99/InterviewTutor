@@ -29,9 +29,30 @@
 		617C858E2FDF8F8000D96887 /* InterviewTutorUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InterviewTutorUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		617EACBE2FE0E88800BDF7F9 /* Exceptions for "InterviewTutor" folder in "InterviewTutorTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
+			);
+			target = 617C85832FDF8F8000D96887 /* InterviewTutorTests */;
+		};
+		617EACBF2FE0E88800BDF7F9 /* Exceptions for "InterviewTutor" folder in "InterviewTutorUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AppIcon.icon,
+			);
+			target = 617C858D2FDF8F8000D96887 /* InterviewTutorUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		617C85772FDF8F7E00D96887 /* InterviewTutor */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				617EACBE2FE0E88800BDF7F9 /* Exceptions for "InterviewTutor" folder in "InterviewTutorTests" target */,
+				617EACBF2FE0E88800BDF7F9 /* Exceptions for "InterviewTutor" folder in "InterviewTutorUITests" target */,
+			);
 			path = InterviewTutor;
 			sourceTree = "<group>";
 		};

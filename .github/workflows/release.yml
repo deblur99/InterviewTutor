@@ -1,83 +1,241 @@
-# Public repo 배포 전략
+# macOS 26 + Xcode 26 GitHub-hosted runner(macos-26)에서
+# 테스트 → 빌드 → 서명 → 공증 → 스테이플 → GitHub Release까지 수행합니다.
 #
-# macOS 26 + Xcode 26이 필요해 GitHub-hosted runner에서는 빌드·공증을 할 수 없습니다.
-# self-hosted runner는 public repo에서 보안상 권장되지 않습니다.
-#
-# 따라서:
-#   1. 로컬에서 테스트·빌드·서명·공증 (scripts/publish-release.sh)
-#   2. 이 워크플로는 공증된 ZIP 아티팩트를 받아 GitHub Release만 게시
-#
-# 서명 인증서·공증 비밀번호는 로컬 키체인에만 두면 됩니다 (GitHub Secrets 불필요).
+# Required secrets:
+#   DEVELOPER_ID_CERTIFICATE_P12
+#   DEVELOPER_ID_CERTIFICATE_PASSWORD
+#   APPLE_ID
+#   APPLE_APP_SPECIFIC_PASSWORD
+#   APPLE_TEAM_ID
 
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
         description: "Release version (e.g. 1.0.0)"
         required: true
         type: string
+      skip_tests:
+        description: "Skip unit/UI tests (not recommended)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 env:
+  SCHEME: InterviewTutor
   APP_NAME: InterviewTutor
+  BUNDLE_ID: com.deblurlab.InterviewTutor
+  ENTITLEMENTS: InterviewTutor/InterviewTutor.entitlements
 
 jobs:
-  publish:
-    name: Publish GitHub Release
-    runs-on: ubuntu-latest
+  test:
+    name: Test
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
+    runs-on: macos-26
     steps:
-      - name: Resolve release metadata
-        id: meta
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
         run: |
-          VERSION="${{ inputs.version }}"
+          xcodebuild -version
+          sw_vers
+
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project InterviewTutor.xcodeproj \
+            -scheme "$SCHEME" \
+            -destination 'platform=macOS' \
+            -only-testing:InterviewTutorTests \
+            -resultBundlePath UnitTestResults.xcresult
+
+      - name: Run UI tests
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project InterviewTutor.xcodeproj \
+            -scheme "$SCHEME" \
+            -destination 'platform=macOS' \
+            -only-testing:InterviewTutorUITests \
+            -resultBundlePath UITestResults.xcresult
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}
+          path: |
+            UnitTestResults.xcresult
+            UITestResults.xcresult
+          if-no-files-found: ignore
+
+  release:
+    name: Build, Sign, Notarize & Publish
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ -z "$VERSION" ]]; then
+            echo "Could not resolve release version." >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact=${APP_NAME}-${VERSION}-macOS.zip" >> "$GITHUB_OUTPUT"
-          echo ""
-          echo "Waiting for local upload:"
-          echo "  ./scripts/publish-release.sh $VERSION"
-          echo ""
-          echo "Or manually:"
-          echo "  gh run upload ${{ github.run_id }} InterviewTutor-${VERSION}-macOS.zip --name InterviewTutor-${VERSION}-macOS.zip"
 
-      - name: Wait for local artifact upload
+      - name: Import Developer ID certificate
         env:
-          GH_TOKEN: ${{ github.token }}
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          ARTIFACT="${{ steps.meta.outputs.artifact }}"
-          for attempt in $(seq 1 120); do
-            COUNT=$(gh api \
-              "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-              --jq "[.artifacts[] | select(.name == \"${ARTIFACT}\")] | length")
-            if [[ "$COUNT" -ge 1 ]]; then
-              echo "Artifact uploaded: ${ARTIFACT}"
-              exit 0
-            fi
-            echo "Waiting for ${ARTIFACT}... (${attempt}/120)"
-            sleep 30
-          done
-          echo "Timed out waiting for local artifact upload." >&2
-          exit 1
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          CERTIFICATE_PATH="$RUNNER_TEMP/build_certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
 
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ steps.meta.outputs.artifact }}
-          path: dist
-          github-token: ${{ github.token }}
-          run-id: ${{ github.run_id }}
+          echo -n "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode -o "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)".*/\1/p' \
+            | head -n 1)
+
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "Developer ID Application identity not found in imported keychain." >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Build Release (Developer ID)
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project InterviewTutor.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath DerivedData \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            CODE_SIGN_ENTITLEMENTS="$ENTITLEMENTS" \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime"
+
+          APP_PATH="DerivedData/Build/Products/Release/${APP_NAME}.app"
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "Built app not found at $APP_PATH" >&2
+            exit 1
+          fi
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify code signature
+        run: |
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          if codesign -d --entitlements - "$APP_PATH" 2>&1 | grep -q "get-task-allow"; then
+            echo "Error: com.apple.security.get-task-allow must not be present in distribution builds." >&2
+            exit 1
+          fi
+
+      - name: Create ZIP for notarization
+        run: |
+          ditto -c -k --keepParent "$APP_PATH" "${{ steps.version.outputs.artifact }}"
+
+      - name: Notarize
+        id: notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          ARTIFACT="${{ steps.version.outputs.artifact }}"
+          SUBMISSION_OUTPUT=$(mktemp)
+
+          xcrun notarytool submit "$ARTIFACT" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait 2>&1 | tee "$SUBMISSION_OUTPUT"
+
+          if grep -q "status: Invalid" "$SUBMISSION_OUTPUT"; then
+            SUBMISSION_ID=$(grep -m1 "id:" "$SUBMISSION_OUTPUT" | awk '{print $2}')
+            echo "Notarization rejected." >&2
+            if [[ -n "$SUBMISSION_ID" ]]; then
+              xcrun notarytool log "$SUBMISSION_ID" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+                --team-id "$APPLE_TEAM_ID" >&2 || true
+            fi
+            exit 1
+          fi
+
+          if ! grep -q "status: Accepted" "$SUBMISSION_OUTPUT"; then
+            echo "Notarization did not reach Accepted status." >&2
+            cat "$SUBMISSION_OUTPUT" >&2
+            exit 1
+          fi
+
+      - name: Staple notarization ticket
+        run: |
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          spctl -a -vv "$APP_PATH"
+
+      - name: Re-create ZIP after staple
+        run: |
+          ditto -c -k --keepParent "$APP_PATH" "${{ steps.version.outputs.artifact }}"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ steps.meta.outputs.tag }}
-          files: dist/${{ steps.meta.outputs.artifact }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          files: ${{ steps.version.outputs.artifact }}
           generate_release_notes: true
           draft: false
           prerelease: false
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" && -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi

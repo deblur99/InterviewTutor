@@ -7,6 +7,49 @@ nonisolated final class DocumentTextExtractor: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.interviewtutor.document.extraction")
 
     func extract(from url: URL) async throws -> DocumentExtractionResult {
+        try await extract(from: [url])
+    }
+
+    func extract(from urls: [URL]) async throws -> DocumentExtractionResult {
+        try Self.validateBatch(urls)
+
+        var results: [DocumentExtractionResult] = []
+        for url in urls {
+            results.append(try await extractSingle(from: url))
+        }
+        return Self.merge(results)
+    }
+
+    static func validateBatch(_ urls: [URL]) throws {
+        guard !urls.isEmpty else {
+            throw DocumentExtractionError.emptyBatch
+        }
+
+        let pdfCount = urls.filter { SupportedDocumentType(fileExtension: $0.pathExtension) == .pdf }.count
+        if pdfCount > 1 {
+            throw DocumentExtractionError.multiplePDFsNotAllowed
+        }
+    }
+
+    static func merge(_ results: [DocumentExtractionResult]) -> DocumentExtractionResult {
+        guard let first = results.first else {
+            return DocumentExtractionResult(text: "", usedOCR: false, sourceDescription: "")
+        }
+        guard results.count > 1 else { return first }
+
+        let text = results
+            .map(\.text)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n")
+
+        return DocumentExtractionResult(
+            text: text,
+            usedOCR: results.contains(where: \.usedOCR),
+            sourceDescription: mergedSourceDescription(from: results)
+        )
+    }
+
+    private func extractSingle(from url: URL) async throws -> DocumentExtractionResult {
         let fileExtension = url.pathExtension
         guard let documentType = SupportedDocumentType(fileExtension: fileExtension) else {
             throw DocumentExtractionError.unsupportedFormat
@@ -89,7 +132,7 @@ nonisolated final class DocumentTextExtractor: @unchecked Sendable {
             return DocumentExtractionResult(
                 text: trimmed,
                 usedOCR: true,
-                sourceDescription: Self.imageSourceLabel(for: type)
+                sourceDescription: Self.imageSourceLabel(for: type) + " 인식"
             )
         }
     }
@@ -133,10 +176,36 @@ nonisolated final class DocumentTextExtractor: @unchecked Sendable {
 
     private static func imageSourceLabel(for type: SupportedDocumentType) -> String {
         switch type {
-        case .png: "PNG 이미지 인식"
-        case .jpeg: "JPEG 이미지 인식"
-        case .heic: "HEIC 이미지 인식"
+        case .png: "PNG 이미지"
+        case .jpeg: "JPEG 이미지"
+        case .heic: "HEIC 이미지"
         case .pdf: "PDF"
+        }
+    }
+
+    private static func mergedSourceDescription(from results: [DocumentExtractionResult]) -> String {
+        var pdfCount = 0
+        var imageCount = 0
+
+        for result in results {
+            if result.sourceDescription.hasPrefix("PDF") {
+                pdfCount += 1
+            } else {
+                imageCount += 1
+            }
+        }
+
+        switch (pdfCount, imageCount) {
+        case (1, 0):
+            return results.first(where: { $0.sourceDescription.hasPrefix("PDF") })?.sourceDescription ?? "PDF"
+        case (0, 1):
+            return results[0].sourceDescription
+        case (0, _) where imageCount > 1:
+            return "이미지 \(imageCount)장 인식"
+        case (1, _) where imageCount > 0:
+            return "PDF + 이미지 \(imageCount)장"
+        default:
+            return "첨부 파일 \(results.count)개"
         }
     }
 }

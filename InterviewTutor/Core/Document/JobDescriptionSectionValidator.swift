@@ -63,7 +63,7 @@ enum JobDescriptionSectionValidator {
         guard !missing.isEmpty else { return nil }
 
         let names = missing.map(\.rawValue).joined(separator: ", ")
-        return "다음 필수 항목이 누락되었을 수 있습니다: \(names). 원문에서 해당 내용을 확인해 주세요."
+        return "다음 필수 항목이 누락되었을 수 있습니다: \(names). \n원문에서 해당 내용을 확인해 주세요."
     }
 
     static func isRequiredSectionHeader(_ line: String) -> Bool {

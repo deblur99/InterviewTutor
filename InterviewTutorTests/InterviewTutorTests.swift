@@ -305,8 +305,191 @@ struct SessionStagePresetTests {
 
     @Test func skilledStageIsAvailable() {
         #expect(SessionStage.skilled.isAvailable)
-        #expect(!SessionStage.expert.isAvailable)
+        #expect(SessionStage.expert.isAvailable)
         #expect(!SessionStage.skilled.coachEnabledByDefault)
+    }
+}
+
+struct ExpertSessionConfigurationTests {
+
+    @Test func defaultConfigurationHasAllCategories() {
+        let config = ExpertSessionConfiguration.default
+        #expect(config.technicalQuestionCount == 2)
+        #expect(config.pressureQuestionCount == 2)
+        #expect(config.generatesFollowUps)
+        #expect(config.sessionSummaryLabel.contains("압박"))
+    }
+
+    @Test func adjustsSecondsForPressureCategory() {
+        var config = ExpertSessionConfiguration.default
+        config.timePressureMultiplier = 0.8
+        let pressure = config.adjustedSeconds(40, category: .pressure)
+        let document = config.adjustedSeconds(40, category: .documentBased)
+        #expect(pressure < document)
+        #expect(pressure >= 20)
+    }
+
+    @Test func biasesWeakCategoriesFromDocumentPool() {
+        var config = ExpertSessionConfiguration.default
+        config.focusWeakAreas = true
+        let biased = config.biased(for: [.technical, .pressure])
+        #expect(biased.technicalQuestionCount > config.technicalQuestionCount)
+        #expect(biased.documentQuestionCount < config.documentQuestionCount)
+    }
+}
+
+struct WeakTopicAnalyzerTests {
+
+    @Test func detectsWeakCategoriesFromSessions() {
+        let profile = CandidateProfile(company: "LG", role: "iOS")
+        let session = InterviewSession(stage: .expert)
+        session.questions = [
+            QuestionRecord(orderIndex: 0, category: .technical, questionText: "Q1", contentScore: 50),
+            QuestionRecord(orderIndex: 1, category: .technical, questionText: "Q2", contentScore: 55),
+            QuestionRecord(orderIndex: 2, category: .behavioral, questionText: "Q3", contentScore: 85),
+            QuestionRecord(orderIndex: 3, category: .behavioral, questionText: "Q4", contentScore: 90),
+        ]
+        profile.sessions = [session]
+
+        let weak = WeakTopicAnalyzer.weakCategories(from: profile)
+        #expect(weak.contains(.technical))
+        #expect(!weak.contains(.behavioral))
+    }
+
+    @Test func returnsNilSummaryWithoutData() {
+        let profile = CandidateProfile(company: "LG", role: "iOS")
+        #expect(WeakTopicAnalyzer.weaknessSummary(from: profile) == nil)
+    }
+}
+
+struct InterviewerToneTests {
+
+    @Test func challengingToneIsFasterAndShorterPause() {
+        #expect(InterviewerTone.challenging.speechRateMultiplier > InterviewerTone.calm.speechRateMultiplier)
+        #expect(InterviewerTone.challenging.preAnswerPauseSeconds < InterviewerTone.calm.preAnswerPauseSeconds)
+    }
+}
+
+struct FreePracticeConfigurationTests {
+
+    @Test func defaultHasTwoQuestions() {
+        let config = FreePracticeConfiguration.default
+        #expect(config.questionCount == 2)
+        #expect(config.selectedTopics.count == 2)
+        #expect(config.isValid)
+    }
+
+    @Test func buildsTopicSequenceRoundRobin() {
+        var config = FreePracticeConfiguration.default
+        config.selectedTopics = [.documentBased, .behavioral, .selfIntro]
+        config.questionCount = 4
+        let sequence = config.topicSequence()
+        #expect(sequence.count == 4)
+        #expect(sequence[0] == .documentBased)
+        #expect(sequence[1] == .behavioral)
+        #expect(sequence[2] == .selfIntro)
+        #expect(sequence[3] == .documentBased)
+    }
+
+    @Test func rejectsEmptyTopicSelection() {
+        var config = FreePracticeConfiguration.default
+        config.selectedTopics = []
+        #expect(!config.isValid)
+    }
+}
+
+struct InterviewCountdownTests {
+
+    @Test func formatsUpcomingCountdown() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let interview = now.addingTimeInterval(5 * 24 * 3600 + 12 * 3600)
+        let countdown = InterviewCountdown.from(interviewDate: interview, now: now)
+
+        #expect(countdown.headline == "D-5")
+        #expect(countdown.detail == "5일 12시간 남음")
+        #expect(countdown.showsPrepTips)
+        #expect(countdown.daysRemainingForTips == 5)
+    }
+
+    @Test func formatsTodayCountdown() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let interview = now.addingTimeInterval(3 * 3600)
+        let countdown = InterviewCountdown.from(interviewDate: interview, now: now)
+
+        #expect(countdown.headline == "D-Day")
+        #expect(countdown.showsPrepTips == false)
+    }
+
+    @Test func marksPastInterview() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let interview = now.addingTimeInterval(-3600)
+        let countdown = InterviewCountdown.from(interviewDate: interview, now: now)
+
+        #expect(countdown.status == .past)
+        #expect(countdown.isActive == false)
+    }
+}
+
+struct InterviewPrepGuideTests {
+
+    @Test func providesTipsForEachCountdownDay() {
+        for day in 1...7 {
+            #expect(InterviewPrepGuide.tip(for: day) != nil)
+        }
+        #expect(InterviewPrepGuide.tip(for: 8) == nil)
+    }
+
+    @Test func dailyNotificationMessagesAreSingleSentence() {
+        for day in 1...7 {
+            let message = InterviewPrepGuide.tip(for: day)?.notificationMessage ?? ""
+            #expect(!message.isEmpty)
+            #expect(!message.contains("\n"))
+        }
+    }
+}
+
+struct ProfileSessionStatsTests {
+
+    @Test func summarizesProfileSessions() {
+        let profile = CandidateProfile(company: "LG", role: "iOS")
+        let recent = InterviewSession(
+            stage: .beginner,
+            date: .now,
+            overallScore: 82,
+            overallGrade: .a,
+            sessionIndex: 2
+        )
+        let older = InterviewSession(
+            stage: .skilled,
+            date: .now.addingTimeInterval(-86_400),
+            overallScore: 70,
+            overallGrade: .b,
+            sessionIndex: 1
+        )
+        profile.sessions = [recent, older]
+
+        let stats = ProfileSessionStats.make(from: profile)
+        #expect(stats.totalCount == 2)
+        #expect(stats.scoredCount == 2)
+        #expect(stats.latestScore == 82)
+        #expect(stats.latestGrade == .a)
+        #expect(stats.bestGrade == .a)
+        #expect(stats.recentSessions.count == 2)
+    }
+
+    @Test func handlesEmptySessions() {
+        let profile = CandidateProfile(company: "LG", role: "iOS")
+        let stats = ProfileSessionStats.make(from: profile)
+        #expect(stats.totalCount == 0)
+        #expect(stats.latestSession == nil)
+    }
+}
+
+struct PracticeTopicTests {
+
+    @Test func mapsToQuestionCategory() {
+        #expect(PracticeTopic.reverseQuestion.category == .reverseQuestion)
+        #expect(PracticeTopic.documentBased.category == .documentBased)
     }
 }
 

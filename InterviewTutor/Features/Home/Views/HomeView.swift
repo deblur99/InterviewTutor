@@ -9,9 +9,11 @@ struct HomeView: View {
 
     @State private var showOnboarding = false
     @State private var showProfileManagement = false
+    @State private var showSessionHistory = false
+    @State private var showInterviewScheduleEditor = false
     @State private var navigationPath = NavigationPath()
     @State private var poolRefillTask: Task<Void, Never>?
-
+    
     private var activeProfile: CandidateProfile? {
         activeProfileStore.activeProfile(in: profiles)
     }
@@ -22,6 +24,7 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
                     if let activeProfile {
+                        interviewSection(for: activeProfile)
                         profileSummary(activeProfile)
                         stageSelection(for: activeProfile)
                     } else {
@@ -48,9 +51,26 @@ struct HomeView: View {
             .sheet(isPresented: $showProfileManagement, onDismiss: handleOnboardingDismiss) {
                 ProfileManagementView()
             }
-            .navigationDestination(for: SessionStage.self) { stage in
+            .sheet(isPresented: $showSessionHistory) {
                 if let activeProfile {
-                    PreSessionView(profile: activeProfile, stage: stage)
+                    ProfileSessionHistorySheet(profile: activeProfile) { session in
+                        navigationPath.append(session)
+                    }
+                }
+            }
+            .sheet(isPresented: $showInterviewScheduleEditor) {
+                if let activeProfile {
+                    InterviewScheduleEditorSheet(profile: activeProfile)
+                }
+            }
+            .navigationDestination(for: HomeDestination.self) { destination in
+                if let activeProfile {
+                    switch destination {
+                    case .stage(let stage):
+                        PreSessionView(profile: activeProfile, stage: stage)
+                    case .freePractice:
+                        PreFreePracticeView(profile: activeProfile)
+                    }
                 }
             }
             .navigationDestination(for: InterviewSession.self) { session in
@@ -71,7 +91,12 @@ struct HomeView: View {
                 let manager = QuestionPoolManager()
                 await manager.ensurePoolFilled(profile: activeProfile, stage: .beginner, context: modelContext)
                 await manager.ensurePoolFilled(profile: activeProfile, stage: .skilled, context: modelContext)
+                await manager.ensurePoolFilled(profile: activeProfile, stage: .expert, context: modelContext)
             }
+        }
+        .task(id: interviewScheduleToken) {
+            guard let activeProfile, activeProfile.interviewDate != nil else { return }
+            await InterviewNotificationScheduler.shared.reschedule(for: activeProfile)
         }
         .onDisappear {
             poolRefillTask?.cancel()
@@ -87,7 +112,10 @@ struct HomeView: View {
         guard let activeProfile, activeProfile.isComplete else { return }
         poolRefillTask?.cancel()
         poolRefillTask = Task {
-            await QuestionPoolManager().ensurePoolFilled(profile: activeProfile, context: modelContext)
+            let manager = QuestionPoolManager()
+            await manager.ensurePoolFilled(profile: activeProfile, stage: .beginner, context: modelContext)
+            await manager.ensurePoolFilled(profile: activeProfile, stage: .skilled, context: modelContext)
+            await manager.ensurePoolFilled(profile: activeProfile, stage: .expert, context: modelContext)
         }
     }
 
@@ -110,6 +138,32 @@ struct HomeView: View {
                 showOnboarding = true
             }
             .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var interviewScheduleToken: String? {
+        guard let activeProfile else { return nil }
+        let dateToken = activeProfile.interviewDate?.timeIntervalSince1970.description ?? "none"
+        return "\(activeProfile.profileID?.uuidString ?? "")-\(dateToken)"
+    }
+
+    private func interviewSection(for profile: CandidateProfile) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            InterviewScheduleCard(profile: profile) {
+                showInterviewScheduleEditor = true
+            }
+
+            if let daysRemaining = profile.interviewCountdown?.daysRemainingForTips,
+               let tip = InterviewPrepGuide.tip(for: daysRemaining) {
+                InterviewPrepTipsCard(tip: tip)
+            } else if case .today = profile.interviewCountdown?.status {
+                GroupBox {
+                    Label(InterviewPrepGuide.dDayEncouragement, systemImage: "hands.clap")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+            }
         }
     }
 
@@ -142,8 +196,17 @@ struct HomeView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                ProfileSessionSummaryCard(
+                    stats: ProfileSessionStats.make(from: profile)
+                ) {
+                    showSessionHistory = true
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
         }
     }
 
@@ -152,57 +215,47 @@ struct HomeView: View {
             Text("훈련 단계")
                 .font(.title2.bold())
 
-            ForEach(SessionStage.allCases) { stage in
+            ForEach(SessionStage.allCases.filter(\.isStructuredStage)) { stage in
                 StageCard(
                     stage: stage,
                     isEnabled: stage.isAvailableInMVP && profile.isComplete
                 ) {
-                    navigationPath.append(stage)
+                    navigationPath.append(HomeDestination.stage(stage))
                 }
             }
 
-            if !profile.sessions.isEmpty {
-                Divider()
-                    .padding(.vertical, 8)
-                Text("이전 세션")
-                    .font(.title3.bold())
-                ForEach(profile.sessions.sorted(by: { $0.date > $1.date })) { session in
-                    Button {
-                        navigationPath.append(session)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                HStack(spacing: 8) {
-                                    Text(session.stage.displayName)
-                                        .font(.headline)
-                                    if let grade = session.overallGrade, let score = session.overallScore {
-                                        Text("\(grade.displayName) · \(score)점")
-                                            .font(.caption.bold())
-                                            .foregroundStyle(grade.accentColor)
-                                    }
-                                }
-                                Text(session.date, style: .date)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            let scoredSessions = ProgressChartDataBuilder.scoredSessions(from: profile)
-            if scoredSessions.count >= 2 {
-                Divider()
-                    .padding(.vertical, 8)
-                ProgressChartView(sessions: scoredSessions)
+            FreePracticeCard(isEnabled: profile.isComplete) {
+                navigationPath.append(HomeDestination.freePractice)
             }
         }
+    }
+}
+
+private struct FreePracticeCard: View {
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("자유 연습")
+                        .font(.headline)
+                    Text("원하는 항목만 골라 문항별·종합 피드백")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "slider.horizontal.3")
+                    .font(.title2)
+                    .foregroundStyle(isEnabled ? Color.accentColor : Color.secondary)
+            }
+            .padding()
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.6)
     }
 }
 

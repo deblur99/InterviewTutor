@@ -14,6 +14,12 @@ final class CandidateProfile {
     var updatedAt: Date
     var questionPoolFingerprint: String?
 
+    var expertSessionConfigJSON: String?
+
+    var freePracticeConfigJSON: String?
+
+    var interviewDate: Date?
+
     @Relationship(deleteRule: .cascade, inverse: \InterviewSession.profile)
     var sessions: [InterviewSession]
 
@@ -31,6 +37,7 @@ final class CandidateProfile {
         createdAt: Date = .now,
         updatedAt: Date = .now,
         questionPoolFingerprint: String? = nil,
+        interviewDate: Date? = nil,
         sessions: [InterviewSession] = [],
         cachedQuestions: [CachedQuestion] = []
     ) {
@@ -44,6 +51,7 @@ final class CandidateProfile {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.questionPoolFingerprint = questionPoolFingerprint
+        self.interviewDate = interviewDate
         self.sessions = sessions
         self.cachedQuestions = cachedQuestions
     }
@@ -84,5 +92,35 @@ final class CandidateProfile {
             return isComplete ? "프로필 완료" : "입력 미완료"
         }
         return industryName
+    }
+
+    var expertSessionConfiguration: ExpertSessionConfiguration {
+        get {
+            guard let json = expertSessionConfigJSON,
+                  let data = json.data(using: .utf8),
+                  let config = try? JSONDecoder().decode(ExpertSessionConfiguration.self, from: data) else {
+                return .default
+            }
+            return config
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            expertSessionConfigJSON = String(data: data, encoding: .utf8)
+        }
+    }
+
+    var freePracticeConfiguration: FreePracticeConfiguration {
+        get {
+            guard let json = freePracticeConfigJSON,
+                  let data = json.data(using: .utf8),
+                  let config = try? JSONDecoder().decode(FreePracticeConfiguration.self, from: data) else {
+                return .default
+            }
+            return config
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            freePracticeConfigJSON = String(data: data, encoding: .utf8)
+        }
     }
 }

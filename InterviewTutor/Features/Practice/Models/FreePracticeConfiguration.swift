@@ -19,7 +19,7 @@ struct FreePracticeConfiguration: Codable, Equatable, Sendable {
     }
 
     var orderedSelectedTopics: [PracticeTopic] {
-        PracticeTopic.allCases.filter { selectedTopics.contains($0) }
+        PracticeTopic.practiceOrder.filter { selectedTopics.contains($0) }
     }
 
     func topicSequence() -> [PracticeTopic] {

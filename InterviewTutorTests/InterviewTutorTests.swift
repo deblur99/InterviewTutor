@@ -491,6 +491,11 @@ struct PracticeTopicTests {
         #expect(PracticeTopic.reverseQuestion.category == .reverseQuestion)
         #expect(PracticeTopic.documentBased.category == .documentBased)
     }
+
+    @Test func usesStablePracticeOrder() {
+        #expect(PracticeTopic.practiceOrder.first == .documentBased)
+        #expect(PracticeTopic.practiceOrder.contains(.careerChangeReason))
+    }
 }
 
 struct LetterGradeTests {

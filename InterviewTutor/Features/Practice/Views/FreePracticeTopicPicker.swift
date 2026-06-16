@@ -10,7 +10,7 @@ struct FreePracticeTopicPicker: View {
                     .font(.headline)
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                    ForEach(PracticeTopic.allCases) { topic in
+                    ForEach(PracticeTopic.practiceOrder) { topic in
                         TopicToggleCard(
                             topic: topic,
                             isSelected: configuration.selectedTopics.contains(topic)

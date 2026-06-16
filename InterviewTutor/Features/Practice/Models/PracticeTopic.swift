@@ -50,4 +50,15 @@ enum PracticeTopic: String, Codable, CaseIterable, Identifiable, Hashable {
     static var defaultSelection: Set<PracticeTopic> {
         [.documentBased, .behavioral]
     }
+
+    /// Stable UI and round-robin order, independent of enum declaration order.
+    static let practiceOrder: [PracticeTopic] = [
+        .documentBased,
+        .behavioral,
+        .companyFit,
+        .careerChangeReason,
+        .selfIntro,
+        .reverseQuestion,
+        .closing,
+    ]
 }

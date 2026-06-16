@@ -7,6 +7,7 @@
 ### 완료된 항목
 
 - [x] 온보딩 — 회사/직무/채용공고/이력서/자소서 입력·저장
+- [x] **다중 프로필** — 추가·수정·삭제·전환 (`ActiveProfileStore`, `ProfileManagementView`)
 - [x] PDF·이미지 첨부 및 텍스트 추출 (PDFKit + Vision OCR)
 - [x] Foundation Models 텍스트 다듬기 + 가드레일 fallback
 - [x] 채용공고 필수 섹션 검증
@@ -16,16 +17,44 @@
 - [x] 카메라 프리뷰·세션 녹화·질문별 세그먼트
 - [x] 면접관 TTS + 타이머 워크플로우
 - [x] 사후 STT + 필러 워드 분석 + AI 피드백
+- [x] **다차원 점수·등급** — 발화·내용·자세 100점, 종합 S~F 등급
+- [x] Vision 기반 자세·응시 분석 (세션 종료 후 영상 배치 분석)
+- [x] 프로필별 연습 추이 차트 (날짜·회차)
 - [x] 세션 다시보기 (질문별 seek)
 - [x] 갓 연습 단계 인윈도우 프롬프터
+- [x] **Phase 4 — 실시간 코치** (아래 참고)
 
 ### 알려진 제한
 
+- 프로필별 질문 풀·세션은 분리되어 있으나, 프로필 간 이력서/자소서 **공유 복사** 기능은 없음
 - 2·3단계(숙련·전문) UI는 있으나 **비활성** 상태
-- 실시간 STT 없음 — 답변 중 전사·피드백은 세션 종료 후
-- 시선 추적(Vision) 미구현
-- NSPanel 기반 HUD 프롬프터 미구현 — 현재는 세션 창 내 패널
+- 실시간 코치·HUD는 **갓 연습(beginner)** 세션에 최적화 (숙련/전문 단계는 Phase 2·3 이후)
 - Foundation Models 미지원 환경에서는 규칙 기반 fallback 질문·피드백 사용
+
+---
+
+## Phase 4 — 실시간 피드백 & 프롬프터 ✅ (우선 구현 완료)
+
+**목표:** 답변 중에도 보조 정보를 제공하되, 실전 부정행위 방지 설계 유지
+
+### 기능
+
+- [x] 실시간 STT — 답변 중 키워드 커버리지 표시 (`StreamingSpeechRecognizer`, `KeywordCoverageTracker`)
+- [x] NSPanel HUD 프롬프터 — 별도 플로팅 창 (갓 연습 전용, 토글)
+- [x] 필러 워드 실시간 카운트 (경고만, 세션 중단 없음)
+- [x] 실시간 시선 HUD (Vision) — 세션 중 응시 비율 표시
+- [x] 코치 힌트 오버레이 — 카메라 하단 반투명 뷰, 토글 on/off
+- [x] 트리거 — 무음 4초+, 시선 이탈 2초+, 필러 급증, 키워드 미커버리지
+
+### 기술 과제
+
+- [x] `StreamingSpeechRecognizer` 스트리밍 모드 + MainActor 브릿지 (`SessionCoachMonitor`)
+- [x] NSPanel + SwiftUI 호스팅 (`PrompterHUDController`)
+- [x] 실시간 Vision `FaceGazeEstimator` 파이프라인 (`LiveGazeMonitor`, `CameraManager` 샘플 핸들러)
+- [x] 오디오 RMS 무음 감지 (`AudioLevelMonitor`)
+- [ ] 성능 프로파일링 — 저사양 Mac에서 STT·Vision 동시 실행 부하 튜닝
+
+> **사후 분석:** 세션 종료 후 Vision·점수화 (`SegmentVisionAnalyzer`, `PostureScorer`) — 별도 완료
 
 ---
 
@@ -41,6 +70,7 @@
 - [ ] 지원 회사·산업 맞춤 질문 (채용공고 + 외부 지식 제한적 활용)
 - [ ] 단계별 질문 수·시간 구성 프리셋
 - [ ] 숙련 단계 전용 피드백 기준 (구체성, 논리 구조)
+- [ ] 숙련 단계 코치 정책 — 프롬프터 축소 또는 기본 off
 
 ### 기술 과제
 
@@ -66,26 +96,6 @@
 
 - [ ] 세션 템플릿 시스템 (SwiftData 모델 확장)
 - [ ] 장기 학습 이력 — 반복 취약 주제 추적 (로컬만)
-
----
-
-## Phase 4 — 실시간 피드백 & 프롬프터
-
-**목표:** 답변 중에도 보조 정보를 제공하되, 실전 부정행위 방지 설계 유지
-
-### 기능
-
-- [ ] 실시간 STT — 답변 중 키워드 커버리지 표시
-- [ ] NSPanel HUD 프롬프터 — 별도 플로팅 창 (갓 연습 전용)
-- [ ] 필러 워드 실시간 카운트 (경고만, 세션 중단 없음)
-- [ ] 시선 추적 (Vision) — 카메라 응시 비율 리포트
-
-### 기술 과제
-
-- [ ] `SpeechRecognizer` 스트리밍 모드 + MainActor 브릿지
-- [ ] NSPanel + SwiftUI 호스팅, 다중 디스플레이 대응
-- [ ] Vision `VNDetectFaceLandmarksRequest` 기반 시선 휴리스틱
-- [ ] 성능 — FM·STT·Vision 동시 실행 시 CPU/GPU 부하 관리
 
 ---
 
@@ -122,11 +132,11 @@
 ```
 [완료] MVP · 갓 연습
    ↓
+[완료] Phase 4 — 실시간 STT, HUD, 시선·코치 힌트
+   ↓
 [다음] Phase 2 — 숙련 단계 질문·피드백
    ↓
 [이후] Phase 3 — 전문/실전 모드
-   ↓
-[병행] Phase 4 — 실시간 STT, HUD, 시선 추적
    ↓
 [마무리] Phase 5 — 테스트·배포
 ```

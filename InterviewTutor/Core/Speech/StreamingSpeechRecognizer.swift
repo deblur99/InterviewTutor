@@ -52,7 +52,7 @@ final class StreamingSpeechRecognizer: @unchecked Sendable {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
+        SpeechRecognitionPreferences.applyOnDevicePreference(to: request, locale: locale)
 
         recognizer = speechRecognizer
         recognitionRequest = request

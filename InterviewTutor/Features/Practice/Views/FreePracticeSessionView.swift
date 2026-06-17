@@ -124,7 +124,7 @@ struct FreePracticeSessionView: View {
 
             if viewModel.phase == .answering {
                 Button("답변 완료") {
-                    Task { await viewModel.skipToNext() }
+                    viewModel.skipToNext()
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)

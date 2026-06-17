@@ -1,9 +1,9 @@
 import AVFoundation
-import AppKit
 import Foundation
 import SwiftData
 import SwiftUI
 
+@MainActor
 @Observable
 final class SessionViewModel {
     let profile: CandidateProfile
@@ -26,7 +26,6 @@ final class SessionViewModel {
     private(set) var isGeneratingPrompter = false
 
     let coachMonitor = SessionCoachMonitor()
-    private let hudController = PrompterHUDController()
 
     private let cameraManager = CameraManager()
     private let interviewerVoice = InterviewerVoice()
@@ -50,6 +49,7 @@ final class SessionViewModel {
     private var preparationGeneration = 0
     private var lastPreparedExpertConfiguration: ExpertSessionConfiguration?
     private var sessionTask: Task<Void, Never>?
+    private var skipsRemainingGrace = false
 
     init(profile: CandidateProfile, stage: SessionStage, expertConfiguration: ExpertSessionConfiguration? = nil) {
         self.profile = profile
@@ -90,16 +90,6 @@ final class SessionViewModel {
         return coachMonitor.activeHint
     }
 
-    var hudState: PrompterHUDState {
-        PrompterHUDState(
-            isVisible: coachMonitor.isHUDEnabled && stage == .beginner && phase.isAnsweringPhase && !isSessionPaused,
-            keywords: currentKeywords,
-            fillerCount: coachMonitor.liveFillerCount,
-            keywordCoveragePercent: coachMonitor.keywordCoveragePercent,
-            gazePercent: coachMonitor.gazePercent
-        )
-    }
-
     var showsSessionControls: Bool {
         switch phase {
         case .preparingPrompter, .selfIntro, .questionTTS, .pauseBeforeAnswer, .answering, .closing:
@@ -138,7 +128,6 @@ final class SessionViewModel {
         timerState = .idle
         interviewerVoice.stop()
         await endAnswerMonitoring()
-        hideHUD()
 
         if !reservedPoolQuestionIDs.isEmpty {
             questionPoolManager.releaseReserved(
@@ -156,14 +145,6 @@ final class SessionViewModel {
 
         await cameraManager.stopRecording()
         await cameraManager.stopSession()
-    }
-
-    func updateHUD(anchorWindow: NSWindow?) {
-        hudController.update(state: hudState, anchorWindow: anchorWindow)
-    }
-
-    func hideHUD() {
-        hudController.hide()
     }
 
     func updateExpertConfiguration(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
@@ -525,7 +506,9 @@ final class SessionViewModel {
         await finishSession()
     }
 
-    func skipToNext() async {
+    func skipToNext() {
+        isSessionPaused = false
+        skipsRemainingGrace = true
         timerTask?.cancel()
         timerState = .finished
     }
@@ -541,6 +524,10 @@ final class SessionViewModel {
         guard !Task.isCancelled else { return }
         while isSessionPaused {
             try? await Task.sleep(for: .milliseconds(100))
+        }
+        if skipsRemainingGrace {
+            skipsRemainingGrace = false
+            return
         }
         try? await Task.sleep(for: .seconds(extraGrace))
     }
@@ -594,7 +581,6 @@ final class SessionViewModel {
 
     private func finishSession() async {
         await endAnswerMonitoring()
-        hideHUD()
         phase = .analyzing
         isAnalyzing = true
 
@@ -644,7 +630,24 @@ final class SessionViewModel {
                         stage: stage
                     )
                 } catch {
-                    record.aiFeedback = "음성 인식에 실패했습니다. 마이크 설정을 확인해 주세요."
+                    do {
+                        transcript = try await speechRecognizer.transcribeSegment(
+                            from: recordedURL,
+                            startTime: max(0, segment.startTime - 0.5),
+                            endTime: segment.endTime + 0.5
+                        )
+                        record.transcribedAnswer = transcript
+                        let fillerReport = FillerWordAnalyzer.analyze(transcript)
+                        fillerCount = fillerReport.totalCount
+                        record.fillerWordCount = fillerCount
+                        record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(
+                            record,
+                            fillerReport: fillerReport,
+                            stage: stage
+                        )
+                    } catch {
+                        record.aiFeedback = "음성 인식에 실패했습니다. 답변 음성이 너무 작거나 녹음 구간이 짧을 수 있습니다."
+                    }
                 }
             }
 
@@ -730,7 +733,6 @@ final class SessionViewModel {
         timerTask?.cancel()
         interviewerVoice.stop()
         await endAnswerMonitoring()
-        hideHUD()
         await cameraManager.setSampleHandlers()
         await cameraManager.stopRecording()
         await cameraManager.stopSession()

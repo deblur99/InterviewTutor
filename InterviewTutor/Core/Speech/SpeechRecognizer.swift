@@ -59,8 +59,29 @@ nonisolated final class SpeechRecognizer: @unchecked Sendable {
             throw SpeechRecognitionError.recognizerUnavailable
         }
 
+        do {
+            return try transcribeOnQueue(
+                audioURL: audioURL,
+                recognizer: recognizer,
+                requiresOnDevice: recognizer.supportsOnDeviceRecognition
+            )
+        } catch {
+            guard recognizer.supportsOnDeviceRecognition else { throw error }
+            return try transcribeOnQueue(
+                audioURL: audioURL,
+                recognizer: recognizer,
+                requiresOnDevice: false
+            )
+        }
+    }
+
+    private func transcribeOnQueue(
+        audioURL: URL,
+        recognizer: SFSpeechRecognizer,
+        requiresOnDevice: Bool
+    ) throws -> String {
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
-        request.requiresOnDeviceRecognition = true
+        request.requiresOnDeviceRecognition = requiresOnDevice
         request.shouldReportPartialResults = false
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -92,6 +113,23 @@ nonisolated final class SpeechRecognizer: @unchecked Sendable {
         outputURL: URL
     ) async throws {
         let asset = AVURLAsset(url: videoURL)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        guard !audioTracks.isEmpty else {
+            throw SpeechRecognitionError.recognitionFailed
+        }
+
+        let duration = try await asset.load(.duration)
+        let durationSeconds = max(0, CMTimeGetSeconds(duration))
+        guard durationSeconds > 0 else {
+            throw SpeechRecognitionError.recognitionFailed
+        }
+
+        let safeStart = min(max(0, startTime), max(0, durationSeconds - 0.1))
+        let safeEnd = min(max(safeStart + 0.1, endTime), durationSeconds)
+        guard safeEnd > safeStart else {
+            throw SpeechRecognitionError.recognitionFailed
+        }
+
         guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw SpeechRecognitionError.recognitionFailed
         }
@@ -99,8 +137,8 @@ nonisolated final class SpeechRecognizer: @unchecked Sendable {
         exportSession.outputURL = outputURL
         exportSession.outputFileType = .m4a
         exportSession.timeRange = CMTimeRange(
-            start: CMTime(seconds: startTime, preferredTimescale: 600),
-            end: CMTime(seconds: endTime, preferredTimescale: 600)
+            start: CMTime(seconds: safeStart, preferredTimescale: 600),
+            end: CMTime(seconds: safeEnd, preferredTimescale: 600)
         )
 
         try await exportSession.export(to: outputURL, as: .m4a)

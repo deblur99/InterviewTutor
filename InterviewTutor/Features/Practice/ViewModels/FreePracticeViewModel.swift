@@ -50,6 +50,7 @@ final class FreePracticeViewModel {
     private var preparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
     private var lastPreparedConfiguration: FreePracticeConfiguration?
+    private var skipsRemainingGrace = false
 
     init(profile: CandidateProfile, configuration: FreePracticeConfiguration? = nil) {
         self.profile = profile
@@ -256,7 +257,8 @@ final class FreePracticeViewModel {
         feedbackContinuation = nil
     }
 
-    func skipToNext() async {
+    func skipToNext() {
+        skipsRemainingGrace = true
         timerTask?.cancel()
         timerState = .finished
     }
@@ -347,7 +349,40 @@ final class FreePracticeViewModel {
                     stage: .freePractice
                 )
             } catch {
-                record.aiFeedback = "음성 인식에 실패했습니다. 마이크 설정을 확인해 주세요."
+                do {
+                    let transcript = try await speechRecognizer.transcribeSegment(
+                        from: videoURL,
+                        startTime: max(0, segment.startTime - 0.5),
+                        endTime: segment.endTime + 0.5,
+                        locale: Locale(identifier: "ko-KR")
+                    )
+                    if !transcript.isEmpty {
+                        record.transcribedAnswer = transcript
+                        let fillerReport = FillerWordAnalyzer.analyze(transcript)
+                        record.fillerWordCount = fillerReport.totalCount
+                        record.aiFeedback = await feedbackGenerator.generateFeedbackForQuestion(
+                            record,
+                            fillerReport: fillerReport,
+                            stage: .freePractice
+                        )
+                        let duration = segment.duration
+                        record.speechScore = SpeechScorer.score(
+                            transcript: transcript,
+                            fillerCount: fillerReport.totalCount,
+                            duration: duration,
+                            recommendedSeconds: question.recommendedSeconds
+                        )
+                        record.contentScore = await contentScorer.score(
+                            question: record,
+                            transcript: transcript,
+                            stage: .freePractice
+                        )
+                    } else {
+                        record.aiFeedback = "음성 인식에 실패했습니다. 답변 음성이 너무 작거나 녹음 구간이 짧을 수 있습니다."
+                    }
+                } catch {
+                    record.aiFeedback = "음성 인식에 실패했습니다. 답변 음성이 너무 작거나 녹음 구간이 짧을 수 있습니다."
+                }
             }
         } else if !speechAuthorized {
             record.aiFeedback = "음성 인식 권한이 없어 피드백을 생성하지 못했습니다."
@@ -414,6 +449,10 @@ final class FreePracticeViewModel {
     private func waitForTimerCompletion(extraGrace: TimeInterval) async {
         while timerState != .finished {
             try? await Task.sleep(for: .milliseconds(100))
+        }
+        if skipsRemainingGrace {
+            skipsRemainingGrace = false
+            return
         }
         try? await Task.sleep(for: .seconds(extraGrace))
     }

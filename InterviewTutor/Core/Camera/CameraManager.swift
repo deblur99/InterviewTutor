@@ -5,6 +5,7 @@ enum CameraError: Error, LocalizedError {
     case permissionDenied
     case deviceUnavailable
     case configurationFailed
+    case microphoneUnavailable
     case writerFailed
 
     var errorDescription: String? {
@@ -12,6 +13,7 @@ enum CameraError: Error, LocalizedError {
         case .permissionDenied: "카메라 또는 마이크 권한이 필요합니다."
         case .deviceUnavailable: "카메라를 찾을 수 없습니다."
         case .configurationFailed: "카메라 설정에 실패했습니다."
+        case .microphoneUnavailable: "마이크를 사용할 수 없습니다. 시스템 설정에서 마이크 접근을 확인해 주세요."
         case .writerFailed: "녹화 파일 생성에 실패했습니다."
         }
     }
@@ -26,6 +28,7 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
     private nonisolated(unsafe) var audioOutput: AVCaptureAudioDataOutput?
     private nonisolated(unsafe) var previewLayer: AVCaptureVideoPreviewLayer?
     private nonisolated(unsafe) var recorder: VideoRecorder?
+    private nonisolated(unsafe) var lastRecordingSegments: [RecordingSegment] = []
     private nonisolated(unsafe) var videoSampleHandler: (@Sendable (CMSampleBuffer) -> Void)?
     private nonisolated(unsafe) var audioSampleHandler: (@Sendable (CMSampleBuffer) -> Void)?
 
@@ -74,6 +77,7 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
             let recorder = VideoRecorder(outputURL: url)
             try recorder.prepare(with: session)
             self.recorder = recorder
+            self.lastRecordingSegments = []
             recorder.start(at: CMClockGetTime(CMClockGetHostTimeClock()))
         }
     }
@@ -81,6 +85,7 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
     func stopRecording() async -> URL? {
         await QueueConfined.run(on: queue) {
             guard let recorder = self.recorder else { return nil }
+            self.lastRecordingSegments = recorder.segments
             let url = recorder.stop()
             self.recorder = nil
             return url
@@ -107,7 +112,7 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
 
     func segments() async -> [RecordingSegment] {
         await QueueConfined.run(on: queue) {
-            self.recorder?.segments ?? []
+            self.recorder?.segments ?? self.lastRecordingSegments
         }
     }
 
@@ -138,12 +143,15 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
         session.addInput(videoDeviceInput)
         videoInput = videoDeviceInput
 
-        if let audioDevice = AVCaptureDevice.default(for: .audio) {
+        if let audioDevice = Self.defaultAudioCaptureDevice() {
             let audioDeviceInput = try AVCaptureDeviceInput(device: audioDevice)
-            if session.canAddInput(audioDeviceInput) {
-                session.addInput(audioDeviceInput)
-                audioInput = audioDeviceInput
+            guard session.canAddInput(audioDeviceInput) else {
+                throw CameraError.microphoneUnavailable
             }
+            session.addInput(audioDeviceInput)
+            audioInput = audioDeviceInput
+        } else if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            throw CameraError.microphoneUnavailable
         }
 
         let videoDataOutput = AVCaptureVideoDataOutput()
@@ -155,15 +163,29 @@ nonisolated final class CameraManager: NSObject, @unchecked Sendable {
         if audioInput != nil {
             let audioDataOutput = AVCaptureAudioDataOutput()
             audioDataOutput.setSampleBufferDelegate(self, queue: queue)
-            if session.canAddOutput(audioDataOutput) {
-                session.addOutput(audioDataOutput)
-                audioOutput = audioDataOutput
+            guard session.canAddOutput(audioDataOutput) else {
+                throw CameraError.microphoneUnavailable
             }
+            session.addOutput(audioDataOutput)
+            audioOutput = audioDataOutput
         }
 
         session.commitConfiguration()
         captureSession = session
         isConfigured = true
+    }
+
+    private static func defaultAudioCaptureDevice() -> AVCaptureDevice? {
+        if let device = AVCaptureDevice.default(for: .audio) {
+            return device
+        }
+
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external],
+            mediaType: .audio,
+            position: .unspecified
+        )
+        return discoverySession.devices.first
     }
 }
 

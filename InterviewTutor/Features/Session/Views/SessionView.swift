@@ -1,5 +1,4 @@
 import AVFoundation
-import AppKit
 import SwiftData
 import SwiftUI
 
@@ -102,7 +101,13 @@ struct SessionView: View {
                         isPaused: viewModel.isSessionPaused,
                         isPreparingPrompter: viewModel.phase == .preparingPrompter || viewModel.isGeneratingPrompter,
                         prompterContent: viewModel.currentPrompterContent,
-                        showsPrompterHUD: viewModel.showsCameraPrompterHUD
+                        showsPrompterHUD: viewModel.showsCameraPrompterHUD,
+                        coachMetrics: viewModel.phase.isAnsweringPhase ? SessionCameraOverlayCoachMetrics(
+                            fillerCount: viewModel.coachMonitor.liveFillerCount,
+                            keywordCoveragePercent: viewModel.coachMonitor.keywordCoveragePercent,
+                            gazePercent: viewModel.coachMonitor.gazePercent,
+                            keywords: viewModel.currentKeywords
+                        ) : nil
                     )
                 }
                 .overlay(alignment: .top) {
@@ -167,9 +172,9 @@ struct SessionView: View {
                 )
             }
 
-            if case .answering = viewModel.phase {
-                Button("다음 질문") {
-                    Task { await viewModel.skipToNext() }
+            if viewModel.phase.isAnsweringPhase {
+                Button("답변 완료") {
+                    viewModel.skipToNext()
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
@@ -177,18 +182,6 @@ struct SessionView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onChange(of: viewModel.hudState) { _, _ in
-            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
-        }
-        .onChange(of: viewModel.coachMonitor.liveFillerCount) { _, _ in
-            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
-        }
-        .onChange(of: viewModel.coachMonitor.keywordCoveragePercent) { _, _ in
-            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
-        }
-        .onChange(of: viewModel.coachMonitor.gazePercent) { _, _ in
-            viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
-        }
     }
 
     private var coachControls: some View {

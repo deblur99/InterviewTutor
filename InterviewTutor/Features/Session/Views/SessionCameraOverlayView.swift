@@ -1,10 +1,18 @@
 import SwiftUI
 
+struct SessionCameraOverlayCoachMetrics {
+    let fillerCount: Int
+    let keywordCoveragePercent: Int
+    let gazePercent: Int
+    let keywords: [String]
+}
+
 struct SessionCameraOverlayView: View {
     let isPaused: Bool
     let isPreparingPrompter: Bool
     let prompterContent: AnswerPrompterContent?
     let showsPrompterHUD: Bool
+    let coachMetrics: SessionCameraOverlayCoachMetrics?
 
     var body: some View {
         GeometryReader { geometry in
@@ -12,7 +20,8 @@ struct SessionCameraOverlayView: View {
                 if showsPrompterHUD, let prompterContent, !isPreparingPrompter {
                     AnswerPrompterHUDOverlay(
                         content: prompterContent,
-                        maxHeight: geometry.size.height * 0.42
+                        coachMetrics: coachMetrics,
+                        maxHeight: geometry.size.height * 0.45
                     )
                 }
 
@@ -31,6 +40,7 @@ struct SessionCameraOverlayView: View {
 
 private struct AnswerPrompterHUDOverlay: View {
     let content: AnswerPrompterContent
+    let coachMetrics: SessionCameraOverlayCoachMetrics?
     let maxHeight: CGFloat
 
     var body: some View {
@@ -39,6 +49,20 @@ private struct AnswerPrompterHUDOverlay: View {
                 Label("프롬프터", systemImage: "text.bubble.fill")
                     .font(.caption.bold())
                     .foregroundStyle(.white.opacity(0.9))
+
+                if let coachMetrics {
+                    HStack(spacing: 10) {
+                        metric("필러", value: "\(coachMetrics.fillerCount)")
+                        metric("키워드", value: "\(coachMetrics.keywordCoveragePercent)%")
+                        metric("응시", value: "\(coachMetrics.gazePercent)%")
+                    }
+
+                    if !coachMetrics.keywords.isEmpty {
+                        keywordRow(keywords: coachMetrics.keywords)
+                    }
+
+                    Divider().overlay(.white.opacity(0.35))
+                }
 
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(Array(content.scriptSentences.enumerated()), id: \.offset) { _, sentence in
@@ -49,8 +73,7 @@ private struct AnswerPrompterHUDOverlay: View {
                     }
                 }
 
-                Divider()
-                    .overlay(.white.opacity(0.35))
+                Divider().overlay(.white.opacity(0.35))
 
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "lightbulb.fill")
@@ -69,6 +92,33 @@ private struct AnswerPrompterHUDOverlay: View {
         .scrollIndicators(.hidden)
         .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .topLeading)
         .background(Color(red: 0.72, green: 0.62, blue: 0.92).opacity(0.55))
+    }
+
+    private func metric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.85))
+            Text(value)
+                .font(.caption.bold())
+                .foregroundStyle(.white)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func keywordRow(keywords: [String]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(keywords, id: \.self) { keyword in
+                    Text(keyword)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.white)
+                }
+            }
+        }
     }
 }
 

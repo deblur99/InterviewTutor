@@ -16,10 +16,14 @@ final class SessionViewModel {
     private(set) var previewLayer: AVCaptureVideoPreviewLayer?
     private(set) var isLoadingQuestions = false
     private(set) var isLoadingFromPool = false
+    private(set) var needsQuestionRegeneration = false
     private(set) var isAnalyzing = false
     private(set) var analysisProgress = ""
     private(set) var errorMessage: String?
     private(set) var completedSession: InterviewSession?
+    private(set) var isSessionPaused = false
+    private(set) var currentPrompterContent: AnswerPrompterContent?
+    private(set) var isGeneratingPrompter = false
 
     let coachMonitor = SessionCoachMonitor()
     private let hudController = PrompterHUDController()
@@ -32,6 +36,7 @@ final class SessionViewModel {
     private let followUpGenerator = FollowUpQuestionGenerator()
     private let segmentVisionAnalyzer = SegmentVisionAnalyzer()
     private let contentScorer = ContentScorer()
+    private let answerPrompterGenerator = AnswerPrompterGenerator()
 
     private var timerTask: Task<Void, Never>?
     private var sessionID = UUID()
@@ -44,6 +49,7 @@ final class SessionViewModel {
     private var questionPreparationTask: Task<Void, Never>?
     private var preparationGeneration = 0
     private var lastPreparedExpertConfiguration: ExpertSessionConfiguration?
+    private var sessionTask: Task<Void, Never>?
 
     init(profile: CandidateProfile, stage: SessionStage, expertConfiguration: ExpertSessionConfiguration? = nil) {
         self.profile = profile
@@ -86,12 +92,70 @@ final class SessionViewModel {
 
     var hudState: PrompterHUDState {
         PrompterHUDState(
-            isVisible: coachMonitor.isHUDEnabled && stage == .beginner && phase.isAnsweringPhase,
+            isVisible: coachMonitor.isHUDEnabled && stage == .beginner && phase.isAnsweringPhase && !isSessionPaused,
             keywords: currentKeywords,
             fillerCount: coachMonitor.liveFillerCount,
             keywordCoveragePercent: coachMonitor.keywordCoveragePercent,
             gazePercent: coachMonitor.gazePercent
         )
+    }
+
+    var showsSessionControls: Bool {
+        switch phase {
+        case .preparingPrompter, .selfIntro, .questionTTS, .pauseBeforeAnswer, .answering, .closing:
+            true
+        default:
+            false
+        }
+    }
+
+    var showsCameraPrompterHUD: Bool {
+        phase.isAnsweringPhase && currentPrompterContent != nil
+    }
+
+    func pauseSession() {
+        guard showsSessionControls, !isSessionPaused else { return }
+        isSessionPaused = true
+        interviewerVoice.stop()
+        if case .running(let remaining) = timerState {
+            timerState = .paused(remaining: remaining)
+        }
+    }
+
+    func resumeSession() {
+        guard isSessionPaused else { return }
+        isSessionPaused = false
+        if case .paused(let remaining) = timerState {
+            timerState = .running(remaining: remaining)
+        }
+    }
+
+    func exitSession(context: ModelContext) async {
+        sessionTask?.cancel()
+        sessionTask = nil
+        isSessionPaused = false
+        timerTask?.cancel()
+        timerState = .idle
+        interviewerVoice.stop()
+        await endAnswerMonitoring()
+        hideHUD()
+
+        if !reservedPoolQuestionIDs.isEmpty {
+            questionPoolManager.releaseReserved(
+                questionIDs: reservedPoolQuestionIDs,
+                profile: profile,
+                context: context
+            )
+            reservedPoolQuestionIDs = []
+        }
+
+        if let videoURL {
+            try? FileManager.default.removeItem(at: videoURL)
+            self.videoURL = nil
+        }
+
+        await cameraManager.stopRecording()
+        await cameraManager.stopSession()
     }
 
     func updateHUD(anchorWindow: NSWindow?) {
@@ -107,16 +171,52 @@ final class SessionViewModel {
     }
 
     func scheduleExpertConfigurationUpdate(_ configuration: ExpertSessionConfiguration, context: ModelContext) {
-        questionPreparationTask?.cancel()
+        markExpertQuestionsStale(configuration, context: context)
+    }
+
+    func markExpertQuestionsStale(_ configuration: ExpertSessionConfiguration, context: ModelContext) {
+        guard !isLoadingQuestions else { return }
+
+        expertConfiguration = configuration
+        modelContext = context
+
+        guard lastPreparedExpertConfiguration != nil || !questionFlow.questions.isEmpty else {
+            needsQuestionRegeneration = true
+            return
+        }
+
+        if configuration.questionGenerationToken != lastPreparedExpertConfiguration?.questionGenerationToken {
+            needsQuestionRegeneration = true
+        }
+    }
+
+    func syncExpertPresentationSettings(_ configuration: ExpertSessionConfiguration) {
+        expertConfiguration = configuration
+    }
+
+    func generateExpertQuestions(context: ModelContext) async {
+        guard stage == .expert, let configuration = expertConfiguration else { return }
+        needsQuestionRegeneration = false
+        await applyExpertConfiguration(configuration, context: context)
+    }
+
+    func cancelQuestionGeneration() {
         configurationUpdateTask?.cancel()
-        configurationUpdateTask = Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await applyExpertConfiguration(configuration, context: context)
+        configurationUpdateTask = nil
+        questionPreparationTask?.cancel()
+        questionPreparationTask = nil
+        preparationGeneration += 1
+        isLoadingQuestions = false
+        isLoadingFromPool = false
+
+        if questionFlow.questions.isEmpty
+            || expertConfiguration?.questionGenerationToken != lastPreparedExpertConfiguration?.questionGenerationToken {
+            needsQuestionRegeneration = true
         }
     }
 
     func prepareExpertIfNeeded(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
+        needsQuestionRegeneration = false
         await applyExpertConfiguration(configuration, context: context)
     }
 
@@ -139,7 +239,9 @@ final class SessionViewModel {
         questionPreparationTask?.cancel()
         expertConfiguration = configuration
 
-        if configuration == lastPreparedExpertConfiguration, !questionFlow.questions.isEmpty {
+        if configuration.questionGenerationToken == lastPreparedExpertConfiguration?.questionGenerationToken,
+           !questionFlow.questions.isEmpty {
+            needsQuestionRegeneration = false
             return
         }
 
@@ -152,6 +254,7 @@ final class SessionViewModel {
 
         if !Task.isCancelled, !questionFlow.questions.isEmpty {
             lastPreparedExpertConfiguration = configuration
+            needsQuestionRegeneration = false
         }
     }
 
@@ -269,6 +372,13 @@ final class SessionViewModel {
     }
 
     func startSession() async {
+        sessionTask = Task {
+            await performSession()
+        }
+        await sessionTask?.value
+    }
+
+    private func performSession() async {
         sessionStarted = true
         sessionID = UUID()
         videoURL = VideoStorageManager.newVideoURL(sessionID: sessionID)
@@ -277,27 +387,39 @@ final class SessionViewModel {
 
         do {
             try await cameraManager.startRecording(to: videoURL)
+            guard !Task.isCancelled else { return }
             phase = .selfIntro
             await runSelfIntro()
+        } catch is CancellationError {
+            return
         } catch {
-            errorMessage = error.localizedDescription
+            if !Task.isCancelled {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
     private func runSelfIntro() async {
+        guard !Task.isCancelled else { return }
         guard let question = currentQuestion, let questionID = questionIDMap[questionFlow.currentIndex] else { return }
+
+        await preparePrompter(for: question)
+        guard !Task.isCancelled else { return }
 
         phase = .questionTTS
         await speakQuestion(question.questionText)
+        guard !Task.isCancelled else { return }
 
         phase = .pauseBeforeAnswer
-        try? await Task.sleep(for: .seconds(preAnswerPause))
+        await sleepUnlessPaused(for: preAnswerPause)
+        guard !Task.isCancelled else { return }
 
         phase = .selfIntro
         await cameraManager.markSegmentStart(questionID: questionID)
         await beginAnswerMonitoring()
         startTimer(duration: answerDuration(for: question))
         await waitForTimerCompletion(extraGrace: 2)
+        guard !Task.isCancelled else { return }
         await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
@@ -308,11 +430,18 @@ final class SessionViewModel {
 
     private func runQuestionLoop() async {
         while let question = currentQuestion, questionFlow.currentIndex < questionFlow.totalCount - 1 {
+            guard !Task.isCancelled else { return }
+
+            await preparePrompter(for: question)
+            guard !Task.isCancelled else { return }
+
             phase = .questionTTS
             await speakQuestion(question.questionText)
+            guard !Task.isCancelled else { return }
 
             phase = .pauseBeforeAnswer
-            try? await Task.sleep(for: .seconds(preAnswerPause))
+            await sleepUnlessPaused(for: preAnswerPause)
+            guard !Task.isCancelled else { return }
 
             guard let questionID = questionIDMap[questionFlow.currentIndex] else { break }
             let answeredIndex = questionFlow.currentIndex
@@ -322,14 +451,17 @@ final class SessionViewModel {
             await beginAnswerMonitoring()
             startTimer(duration: answerDuration(for: question))
             await waitForTimerCompletion(extraGrace: 5)
+            guard !Task.isCancelled else { return }
             await endAnswerMonitoring()
             _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
             await maybeInsertFollowUp(afterIndex: answeredIndex, parentQuestion: question)
+            guard !Task.isCancelled else { return }
 
             if !questionFlow.advance() { break }
         }
 
+        guard !Task.isCancelled else { return }
         await runClosing()
     }
 
@@ -367,19 +499,26 @@ final class SessionViewModel {
     }
 
     private func runClosing() async {
+        guard !Task.isCancelled else { return }
         guard let question = currentQuestion, let questionID = questionIDMap[questionFlow.currentIndex] else { return }
+
+        await preparePrompter(for: question)
+        guard !Task.isCancelled else { return }
 
         phase = .questionTTS
         await speakQuestion(question.questionText)
+        guard !Task.isCancelled else { return }
 
         phase = .pauseBeforeAnswer
-        try? await Task.sleep(for: .seconds(preAnswerPause))
+        await sleepUnlessPaused(for: preAnswerPause)
+        guard !Task.isCancelled else { return }
 
         phase = .closing
         await cameraManager.markSegmentStart(questionID: questionID)
         await beginAnswerMonitoring()
         startTimer(duration: answerDuration(for: question))
         await waitForTimerCompletion(extraGrace: 10)
+        guard !Task.isCancelled else { return }
         await endAnswerMonitoring()
         _ = await cameraManager.markSegmentEnd(questionID: questionID)
 
@@ -393,9 +532,45 @@ final class SessionViewModel {
 
     private func waitForTimerCompletion(extraGrace: TimeInterval) async {
         while timerState != .finished {
+            guard !Task.isCancelled else { return }
+            while isSessionPaused {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard !Task.isCancelled else { return }
+        while isSessionPaused {
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .seconds(extraGrace))
+    }
+
+    private func preparePrompter(for question: GeneratedQuestion) async {
+        phase = .preparingPrompter
+        isGeneratingPrompter = true
+        currentPrompterContent = await answerPrompterGenerator.generate(
+            profile: profile,
+            question: question,
+            stage: stage
+        )
+        isGeneratingPrompter = false
+        guard !Task.isCancelled else { return }
+
+        while isSessionPaused {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func sleepUnlessPaused(for duration: TimeInterval) async {
+        var elapsed: TimeInterval = 0
+        while elapsed < duration {
+            guard !Task.isCancelled else { return }
+            while isSessionPaused {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+            elapsed += 0.1
+        }
     }
 
     private func startTimer(duration: TimeInterval) {
@@ -406,6 +581,9 @@ final class SessionViewModel {
             var remaining = duration
             while remaining > 0 {
                 guard !Task.isCancelled else { return }
+                while isSessionPaused {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
                 try? await Task.sleep(for: .seconds(1))
                 remaining -= 1
                 timerState = .running(remaining: max(0, remaining))
@@ -541,6 +719,9 @@ final class SessionViewModel {
     }
 
     func cleanup(context: ModelContext? = nil) async {
+        sessionTask?.cancel()
+        sessionTask = nil
+        isSessionPaused = false
         if let context {
             releaseReservedQuestions(context: context)
         } else if let modelContext {

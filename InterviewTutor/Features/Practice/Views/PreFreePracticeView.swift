@@ -26,39 +26,32 @@ struct PreFreePracticeView: View {
                     Spacer()
                 }
 
-                Text("자유 연습")
-                    .font(.largeTitle.bold())
+                PrepSessionTitle(title: "자유 연습")
 
                 Text("연습하고 싶은 항목만 골라 집중 훈련합니다. 문항마다 피드백을 받고, 마지막에 종합 피드백이 제공됩니다.")
                     .foregroundStyle(.secondary)
 
-                HStack(alignment: .top, spacing: 24) {
-                    FreePracticeTopicPicker(configuration: $configuration)
-                        .frame(maxWidth: 380)
-
+                AdaptivePrepSectionsLayout {
+                    FreePracticeTopicPicker(
+                        configuration: $configuration,
+                        isSettingsLocked: viewModel.isLoadingQuestions
+                    ) {
+                        questionGenerationControls
+                    }
+                } content: {
                     practiceQuestionsPanel
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-
-                CenteredPrimaryActionButton(
-                    title: "연습 시작",
-                    systemImage: "play.fill",
-                    isDisabled: !configuration.isValid || viewModel.questions.isEmpty
-                ) {
-                    viewModel.persistConfiguration(context: modelContext)
-                    navigateToSession = true
-                }
-                .padding(.top, 8)
             }
             .padding(32)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("자유 연습")
         .task {
-            await viewModel.prepareIfNeeded(context: modelContext)
+            viewModel.noteConfigurationChange(configuration)
         }
         .onChange(of: configuration.preparationToken) { _, _ in
-            viewModel.scheduleConfigurationUpdate(configuration, context: modelContext)
+            guard !viewModel.isLoadingQuestions else { return }
+            viewModel.noteConfigurationChange(configuration)
         }
         .onDisappear {
             viewModel.cancelPendingUpdates()
@@ -97,9 +90,7 @@ struct PreFreePracticeView: View {
                     ProgressView("질문 준비 중...")
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else if viewModel.questions.isEmpty {
-                    Text(configuration.isValid
-                         ? "질문을 생성하지 못했습니다."
-                         : "항목을 선택하면 질문이 생성됩니다.")
+                    Text(emptyQuestionsMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
@@ -122,6 +113,7 @@ struct PreFreePracticeView: View {
                     }
                     .listStyle(.plain)
                     .frame(minHeight: CGFloat(viewModel.questions.count) * 56 + 8)
+                    .padding(.vertical, 8)
 
                     Button {
                         showCustomQuestionSheet = true
@@ -130,10 +122,49 @@ struct PreFreePracticeView: View {
                     }
                     .buttonStyle(.bordered)
                 }
+
+                PrepContentPanelFooter(
+                    startTitle: "연습 시작",
+                    startSystemImage: "play.fill",
+                    isStartDisabled: isPracticeStartDisabled,
+                    onStart: {
+                        viewModel.persistConfiguration(context: modelContext)
+                        navigateToSession = true
+                    }
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
+    }
+
+    private var questionGenerationControls: some View {
+        PrepQuestionGenerationControls(
+            isLoading: viewModel.isLoadingQuestions,
+            needsRegeneration: viewModel.needsQuestionRegeneration,
+            canGenerate: configuration.isValid,
+            hasPreparedQuestions: !viewModel.questions.isEmpty
+        ) {
+            Task {
+                await viewModel.generateQuestions(context: modelContext)
+            }
+        } onCancel: {
+            viewModel.cancelQuestionGeneration()
+        }
+    }
+
+    private var isPracticeStartDisabled: Bool {
+        viewModel.isLoadingQuestions
+            || viewModel.needsQuestionRegeneration
+            || !configuration.isValid
+            || viewModel.questions.isEmpty
+    }
+
+    private var emptyQuestionsMessage: String {
+        if !configuration.isValid {
+            return "항목을 선택하면 질문을 만들 수 있습니다."
+        }
+        return "질문 생성을 눌러 연습 목록을 만들어 주세요."
     }
 
     private func questionRow(index: Int, question: GeneratedQuestion) -> some View {

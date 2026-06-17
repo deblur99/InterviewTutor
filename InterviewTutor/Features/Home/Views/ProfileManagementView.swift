@@ -197,6 +197,7 @@ private struct ProfileRow: View {
                     }
                 }
                 .contentShape(Rectangle())
+                .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
 

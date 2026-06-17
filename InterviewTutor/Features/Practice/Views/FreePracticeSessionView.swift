@@ -149,6 +149,8 @@ struct FreePracticeSessionView: View {
                     remainingSeconds: remaining
                 )
             }
+        case .paused:
+            EmptyView()
         case .finished:
             Text("시간 종료")
                 .font(.caption)

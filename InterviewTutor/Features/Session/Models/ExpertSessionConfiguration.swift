@@ -94,4 +94,18 @@ struct ExpertSessionConfiguration: Codable, Equatable, Sendable {
         ]
         .joined(separator: "|")
     }
+
+    /// 질문 목록 재생성이 필요한 설정만 포함 (톤·시간 압박 제외)
+    var questionGenerationToken: String {
+        [
+            String(documentQuestionCount),
+            String(behavioralQuestionCount),
+            String(companyQuestionCount),
+            String(technicalQuestionCount),
+            String(pressureQuestionCount),
+            String(comprehensiveQuestionCount),
+            focusWeakAreas ? "1" : "0",
+        ]
+        .joined(separator: "|")
+    }
 }

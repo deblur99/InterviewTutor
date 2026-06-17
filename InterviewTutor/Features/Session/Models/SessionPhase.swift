@@ -2,6 +2,7 @@ import Foundation
 
 enum SessionPhase: Equatable {
     case preSession
+    case preparingPrompter
     case selfIntro
     case questionTTS
     case pauseBeforeAnswer
@@ -21,5 +22,6 @@ enum SessionPhase: Equatable {
 enum SessionTimerState: Equatable {
     case idle
     case running(remaining: TimeInterval)
+    case paused(remaining: TimeInterval)
     case finished
 }

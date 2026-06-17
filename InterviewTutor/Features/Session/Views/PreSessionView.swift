@@ -47,33 +47,22 @@ struct PreSessionView: View {
                     Spacer()
                 }
 
-                Text("세션 미리보기")
-                    .font(.largeTitle.bold())
+                PrepSessionTitle(title: "세션 미리보기")
 
                 if stage == .expert {
-                    ExpertSessionSetupView(
-                        configuration: $expertConfig,
-                        weaknessSummary: WeakTopicAnalyzer.weaknessSummary(from: profile)
-                    )
-                }
-
-                if viewModel.isLoadingQuestions {
-                    ProgressView(loadingMessage)
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                } else {
-                    summaryCard
-                    questionPreview
-                    CenteredPrimaryActionButton(
-                        title: "면접 시작",
-                        systemImage: "video.fill",
-                        isDisabled: viewModel.questionFlow.questions.isEmpty
-                    ) {
-                        if stage == .expert {
-                            viewModel.persistExpertConfiguration(expertConfig, context: modelContext)
+                    AdaptivePrepSectionsLayout {
+                        ExpertSessionSetupView(
+                            configuration: $expertConfig,
+                            weaknessSummary: WeakTopicAnalyzer.weaknessSummary(from: profile),
+                            isSettingsLocked: viewModel.isLoadingQuestions
+                        ) {
+                            expertQuestionGenerationControls
                         }
-                        navigateToSession = true
+                    } content: {
+                        previewPanelContent
                     }
-                    .padding(.top, 8)
+                } else {
+                    previewPanelContent
                 }
             }
             .padding(32)
@@ -82,14 +71,18 @@ struct PreSessionView: View {
         .navigationTitle("세션 준비")
         .task {
             if stage == .expert {
-                await viewModel.prepareExpertIfNeeded(expertConfig, context: modelContext)
+                viewModel.markExpertQuestionsStale(expertConfig, context: modelContext)
             } else {
                 await viewModel.prepareQuestions(context: modelContext)
             }
         }
-        .onChange(of: expertConfig.preparationToken) { _, _ in
-            guard stage == .expert else { return }
-            viewModel.scheduleExpertConfigurationUpdate(expertConfig, context: modelContext)
+        .onChange(of: expertConfig) { oldValue, newValue in
+            guard stage == .expert, !viewModel.isLoadingQuestions else { return }
+            if oldValue.questionGenerationToken != newValue.questionGenerationToken {
+                viewModel.markExpertQuestionsStale(newValue, context: modelContext)
+            } else {
+                viewModel.syncExpertPresentationSettings(newValue)
+            }
         }
         .onDisappear {
             viewModel.cancelPendingConfigurationUpdates()
@@ -113,18 +106,70 @@ struct PreSessionView: View {
         }
     }
 
-    private var summaryCard: some View {
+    private var isSessionStartDisabled: Bool {
+        if viewModel.isLoadingQuestions { return true }
+        if stage == .expert {
+            return viewModel.needsQuestionRegeneration || viewModel.questionFlow.questions.isEmpty
+        }
+        return viewModel.questionFlow.questions.isEmpty
+    }
+
+    private func startSession() {
+        if stage == .expert {
+            viewModel.persistExpertConfiguration(expertConfig, context: modelContext)
+        }
+        navigateToSession = true
+    }
+
+    private var previewPanelContent: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
-                LabeledContent("질문 수", value: "\(viewModel.questionFlow.totalCount)개")
-                LabeledContent("예상 시간", value: "\(viewModel.questionFlow.expectedDurationSeconds / 60)분")
-                LabeledContent("구성", value: sessionSummary)
-                if stage == .expert {
-                    LabeledContent("면접관 톤", value: expertConfig.interviewerTone.displayName)
+                if viewModel.isLoadingQuestions {
+                    ProgressView(loadingMessage)
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                } else {
+                    summaryContents
+                    questionPreview
                 }
+
+                PrepContentPanelFooter(
+                    startTitle: "면접 시작",
+                    startSystemImage: "video.fill",
+                    isStartDisabled: isSessionStartDisabled,
+                    onStart: startSession
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+        }
+    }
+
+    private var expertQuestionGenerationControls: some View {
+        PrepQuestionGenerationControls(
+            isLoading: viewModel.isLoadingQuestions,
+            needsRegeneration: viewModel.needsQuestionRegeneration,
+            canGenerate: true,
+            hasPreparedQuestions: !viewModel.questionFlow.questions.isEmpty
+        ) {
+            Task {
+                await viewModel.generateExpertQuestions(context: modelContext)
+            }
+        } onCancel: {
+            viewModel.cancelQuestionGeneration()
+        }
+    }
+
+    private var summaryContents: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("예상 질문 개요", systemImage: "checkmark.bubble.fill")
+                .font(.headline)
+
+            LabeledContent("질문 수", value: "\(viewModel.questionFlow.totalCount)개")
+            LabeledContent("예상 시간", value: "\(viewModel.questionFlow.expectedDurationSeconds / 60)분")
+            LabeledContent("구성", value: sessionSummary)
+            if stage == .expert {
+                LabeledContent("면접관 톤", value: expertConfig.interviewerTone.displayName)
+            }
         }
     }
 

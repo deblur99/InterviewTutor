@@ -396,6 +396,16 @@ struct FreePracticeConfigurationTests {
         config.selectedTopics = []
         #expect(!config.isValid)
     }
+
+    @Test func freePracticeAlwaysUsesManualGenerationWhenValid() {
+        var config = FreePracticeConfiguration.default
+        config.selectedTopics = [.selfIntro, .closing]
+        #expect(config.usesManualQuestionGeneration)
+
+        config.selectedTopics = [.documentBased, .selfIntro]
+        #expect(config.requiresAIGeneration)
+        #expect(config.usesManualQuestionGeneration)
+    }
 }
 
 @MainActor
@@ -527,6 +537,11 @@ struct PracticeTopicTests {
     @Test func usesStablePracticeOrder() {
         #expect(PracticeTopic.practiceOrder.first == .documentBased)
         #expect(PracticeTopic.practiceOrder.contains(.careerChangeReason))
+    }
+
+    @Test func distinguishesPresetAndAITopics() {
+        #expect(PracticeTopic.selfIntro.usesPresetQuestions)
+        #expect(PracticeTopic.documentBased.usesPresetQuestions == false)
     }
 }
 

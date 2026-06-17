@@ -23,9 +23,17 @@ struct InterviewTutorApp: App {
         WindowGroup {
             HomeView()
                 .environment(ActiveProfileStore())
+                .frame(
+                    minWidth: MainWindowMetrics.minimumWidth,
+                    minHeight: MainWindowMetrics.minimumHeight
+                )
         }
         .modelContainer(sharedModelContainer)
-        .defaultSize(width: 1100, height: 750)
+        .defaultSize(
+            width: MainWindowMetrics.defaultWidth,
+            height: MainWindowMetrics.defaultHeight
+        )
+        .windowResizability(.contentMinSize)
         .commands {
             InterviewTutorAppCommands()
         }
@@ -40,6 +48,13 @@ struct InterviewTutorApp: App {
         .windowResizability(.contentSize)
         .windowStyle(.hiddenTitleBar)
     }
+}
+
+private enum MainWindowMetrics {
+    static let defaultWidth: CGFloat = 1100
+    static let defaultHeight: CGFloat = 750
+    static let minimumWidth: CGFloat = 500
+    static let minimumHeight: CGFloat = 750
 }
 
 private struct InterviewTutorAppCommands: Commands {

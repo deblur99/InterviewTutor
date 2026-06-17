@@ -1,39 +1,62 @@
 import SwiftUI
 
-struct FreePracticeTopicPicker: View {
+struct FreePracticeTopicPicker<Footer: View>: View {
     @Binding var configuration: FreePracticeConfiguration
+    var isSettingsLocked: Bool = false
+    @ViewBuilder private let footer: () -> Footer
+
+    init(
+        configuration: Binding<FreePracticeConfiguration>,
+        isSettingsLocked: Bool = false,
+        @ViewBuilder footer: @escaping () -> Footer
+    ) {
+        _configuration = configuration
+        self.isSettingsLocked = isSettingsLocked
+        self.footer = footer
+    }
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 14) {
-                Text("연습 항목")
-                    .font(.headline)
+                settingsContent
+                    .disabled(isSettingsLocked)
 
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                    ForEach(PracticeTopic.practiceOrder) { topic in
-                        TopicToggleCard(
-                            topic: topic,
-                            isSelected: configuration.selectedTopics.contains(topic)
-                        ) {
-                            toggle(topic)
-                        }
-                    }
-                }
-
-                Stepper(
-                    "연습 문항 수: \(configuration.questionCount)개",
-                    value: $configuration.questionCount,
-                    in: 1...10
-                )
-
-                if configuration.selectedTopics.isEmpty {
-                    Text("하나 이상의 항목을 선택해 주세요.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                PrepSettingsGenerationFooter {
+                    footer()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
+        }
+    }
+
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("연습 항목")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                ForEach(PracticeTopic.practiceOrder) { topic in
+                    TopicToggleCard(
+                        topic: topic,
+                        isSelected: configuration.selectedTopics.contains(topic)
+                    ) {
+                        toggle(topic)
+                    }
+                }
+            }
+
+            Stepper(
+                "연습 문항 수: \(configuration.questionCount)개",
+                value: $configuration.questionCount,
+                in: 1...10
+            )
+
+            if configuration.selectedTopics.isEmpty {
+                Text("하나 이상의 항목을 선택해 주세요.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
@@ -43,6 +66,12 @@ struct FreePracticeTopicPicker: View {
         } else {
             configuration.selectedTopics.insert(topic)
         }
+    }
+}
+
+extension FreePracticeTopicPicker where Footer == EmptyView {
+    init(configuration: Binding<FreePracticeConfiguration>, isSettingsLocked: Bool = false) {
+        self.init(configuration: configuration, isSettingsLocked: isSettingsLocked, footer: { EmptyView() })
     }
 }
 

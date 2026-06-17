@@ -47,6 +47,16 @@ enum PracticeTopic: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// AI 호출 없이 고정 템플릿으로 즉시 만들 수 있는 항목
+    var usesPresetQuestions: Bool {
+        switch self {
+        case .documentBased, .behavioral, .companyFit:
+            false
+        case .selfIntro, .careerChangeReason, .reverseQuestion, .closing:
+            true
+        }
+    }
+
     static var defaultSelection: Set<PracticeTopic> {
         [.documentBased, .behavioral]
     }

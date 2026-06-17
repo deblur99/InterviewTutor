@@ -25,6 +25,7 @@ final class FreePracticeViewModel {
     private(set) var timerState: SessionTimerState = .idle
     private(set) var previewLayer: AVCaptureVideoPreviewLayer?
     private(set) var isLoadingQuestions = false
+    private(set) var needsQuestionRegeneration = false
     private(set) var isAnalyzing = false
     private(set) var analysisProgress = ""
     private(set) var errorMessage: String?
@@ -69,17 +70,26 @@ final class FreePracticeViewModel {
         errorMessage = nil
     }
 
-    func scheduleConfigurationUpdate(_ configuration: FreePracticeConfiguration, context: ModelContext) {
-        preparationTask?.cancel()
-        configurationUpdateTask?.cancel()
-        configurationUpdateTask = Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await applyConfigurationUpdate(configuration, context: context)
+    func noteConfigurationChange(_ configuration: FreePracticeConfiguration) {
+        guard !isLoadingQuestions else { return }
+
+        self.configuration = configuration
+
+        guard configuration.isValid else {
+            questions = []
+            lastPreparedConfiguration = nil
+            needsQuestionRegeneration = false
+            errorMessage = "연습 항목을 하나 이상 선택해 주세요."
+            return
         }
+
+        errorMessage = nil
+        needsQuestionRegeneration = lastPreparedConfiguration == nil
+            || configuration != lastPreparedConfiguration
     }
 
-    func prepareIfNeeded(context: ModelContext) async {
+    func generateQuestions(context: ModelContext) async {
+        needsQuestionRegeneration = false
         await applyConfigurationUpdate(configuration, context: context)
     }
 
@@ -93,6 +103,16 @@ final class FreePracticeViewModel {
         configurationUpdateTask = nil
         preparationTask?.cancel()
         preparationTask = nil
+    }
+
+    func cancelQuestionGeneration() {
+        cancelPendingUpdates()
+        preparationGeneration += 1
+        isLoadingQuestions = false
+
+        if questions.isEmpty || configuration != lastPreparedConfiguration {
+            needsQuestionRegeneration = true
+        }
     }
 
     func moveQuestions(from source: IndexSet, to destination: Int) {
@@ -150,6 +170,7 @@ final class FreePracticeViewModel {
 
         if configuration == lastPreparedConfiguration, !questions.isEmpty {
             errorMessage = nil
+            needsQuestionRegeneration = false
             return
         }
 
@@ -189,6 +210,7 @@ final class FreePracticeViewModel {
         rebuildQuestionIDMap()
         if !questions.isEmpty {
             lastPreparedConfiguration = configuration
+            needsQuestionRegeneration = false
             errorMessage = nil
         }
     }

@@ -32,4 +32,14 @@ struct FreePracticeConfiguration: Codable, Equatable, Sendable {
         let topics = orderedSelectedTopics.map(\.rawValue).joined(separator: ",")
         return "\(topics)|\(questionCount)"
     }
+
+    /// 선택 항목 중 AI 생성이 필요한 항목이 있는지
+    var requiresAIGeneration: Bool {
+        orderedSelectedTopics.contains { !$0.usesPresetQuestions }
+    }
+
+    /// 자유 연습은 항상 옵션 선택 후 수동 생성
+    var usesManualQuestionGeneration: Bool {
+        isValid
+    }
 }

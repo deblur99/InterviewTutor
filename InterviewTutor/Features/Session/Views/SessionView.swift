@@ -9,6 +9,8 @@ struct SessionView: View {
 
     @Bindable var viewModel: SessionViewModel
 
+    @State private var showExitConfirmation = false
+
     var body: some View {
         Group {
             switch viewModel.phase {
@@ -31,6 +33,7 @@ struct SessionView: View {
                 }
             default:
                 activeSessionView
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationBarBackButtonHidden(viewModel.phase != .preSession && viewModel.phase != .postSession)
@@ -43,55 +46,87 @@ struct SessionView: View {
         .onDisappear {
             Task { await viewModel.cleanup(context: modelContext) }
         }
+        .confirmationDialog(
+            "세션을 나가시겠습니까?",
+            isPresented: $showExitConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("나가기", role: .destructive) {
+                Task {
+                    await viewModel.exitSession(context: modelContext)
+                    dismiss()
+                }
+            }
+            Button("계속하기", role: .cancel) {}
+        } message: {
+            Text("진행중인 내용은 저장되지 않습니다.")
+        }
     }
+
+    private static let sidePanelWidth: CGFloat = 320
 
     private var activeSessionView: some View {
         HStack(spacing: 0) {
             cameraSection
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(0)
 
             sidePanel
-                .frame(width: 320)
+                .frame(width: Self.sidePanelWidth)
+                .layoutPriority(1)
                 .background(.regularMaterial)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var cameraSection: some View {
-        ZStack(alignment: .bottom) {
-            if let previewLayer = viewModel.previewLayer {
-                CameraPreviewRepresentable(previewLayer: previewLayer)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding()
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.quaternary)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                    .overlay {
-                        ProgressView("카메라 연결 중...")
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let previewLayer = viewModel.previewLayer {
+                        CameraPreviewRepresentable(previewLayer: previewLayer)
+                    } else {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.quaternary)
+                            .overlay {
+                                ProgressView("카메라 연결 중...")
+                            }
                     }
-                    .padding()
-            }
-
-            VStack(spacing: 8) {
-                if viewModel.phase.isAnsweringPhase, viewModel.isCoachEnabled {
-                    LiveCoachStatusBar(
-                        fillerCount: viewModel.coachMonitor.liveFillerCount,
-                        keywordCoveragePercent: viewModel.coachMonitor.keywordCoveragePercent,
-                        gazePercent: viewModel.coachMonitor.gazePercent
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .aspectRatio(16 / 9, contentMode: .fill)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay {
+                    SessionCameraOverlayView(
+                        isPaused: viewModel.isSessionPaused,
+                        isPreparingPrompter: viewModel.phase == .preparingPrompter || viewModel.isGeneratingPrompter,
+                        prompterContent: viewModel.currentPrompterContent,
+                        showsPrompterHUD: viewModel.showsCameraPrompterHUD
                     )
                 }
-
-                if let hint = viewModel.activeCoachHint {
-                    CoachHintOverlay(hint: hint)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                .overlay(alignment: .top) {
+                    phaseIndicator
+                        .padding(12)
                 }
-            }
+                .padding()
 
-            VStack {
-                phaseIndicator
-                    .padding()
-                Spacer()
+                VStack(spacing: 8) {
+                    if viewModel.phase.isAnsweringPhase, viewModel.isCoachEnabled {
+                        LiveCoachStatusBar(
+                            fillerCount: viewModel.coachMonitor.liveFillerCount,
+                            keywordCoveragePercent: viewModel.coachMonitor.keywordCoveragePercent,
+                            gazePercent: viewModel.coachMonitor.gazePercent
+                        )
+                    }
+
+                    if let hint = viewModel.activeCoachHint {
+                        CoachHintOverlay(hint: hint)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
             }
         }
     }
@@ -113,12 +148,24 @@ struct SessionView: View {
 
             coachControls
 
-            InWindowPrompterView(
-                keywords: viewModel.currentKeywords,
-                showAnswerHints: viewModel.stage.showsFullPrompter
-            )
-
             Spacer()
+
+            if viewModel.showsSessionControls {
+                SessionFlowControls(
+                    isPaused: viewModel.isSessionPaused,
+                    isEnabled: true,
+                    onTogglePause: {
+                        if viewModel.isSessionPaused {
+                            viewModel.resumeSession()
+                        } else {
+                            viewModel.pauseSession()
+                        }
+                    },
+                    onExit: {
+                        showExitConfirmation = true
+                    }
+                )
+            }
 
             if case .answering = viewModel.phase {
                 Button("다음 질문") {
@@ -129,6 +176,7 @@ struct SessionView: View {
             }
         }
         .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: viewModel.hudState) { _, _ in
             viewModel.updateHUD(anchorWindow: NSApp.keyWindow)
         }
@@ -174,6 +222,18 @@ struct SessionView: View {
                     remainingSeconds: remaining
                 )
             }
+        case .paused(let remaining):
+            if let question = viewModel.currentQuestion {
+                VStack(spacing: 8) {
+                    TimerRingView(
+                        totalSeconds: TimeInterval(question.recommendedSeconds),
+                        remainingSeconds: remaining
+                    )
+                    Text("일시정지")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
         case .finished:
             Text("시간 종료")
                 .font(.caption)
@@ -196,13 +256,18 @@ struct SessionView: View {
     }
 
     private var phaseLabel: String {
+        if viewModel.isSessionPaused {
+            return "일시정지"
+        }
+
         switch viewModel.phase {
-        case .selfIntro: "자기소개"
-        case .questionTTS: "질문 재생 중"
-        case .pauseBeforeAnswer: "답변 준비"
-        case .answering: "답변 중"
-        case .closing: "마무리 발언"
-        default: "녹화 중"
+        case .preparingPrompter: return "답변 준비"
+        case .selfIntro: return "자기소개"
+        case .questionTTS: return "질문 재생 중"
+        case .pauseBeforeAnswer: return "답변 준비"
+        case .answering: return "답변 중"
+        case .closing: return "마무리 발언"
+        default: return "녹화 중"
         }
     }
 

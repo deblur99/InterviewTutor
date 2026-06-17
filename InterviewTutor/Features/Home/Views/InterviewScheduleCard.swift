@@ -34,7 +34,7 @@ struct InterviewScheduleCard: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(interviewDate, format: .dateTime.year().month().day().weekday(.wide).hour().minute())
+                Text(InterviewScheduleFormatting.dateTime(interviewDate))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

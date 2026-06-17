@@ -168,45 +168,45 @@ struct HomeView: View {
     }
 
     private func profileSummary(_ profile: CandidateProfile) -> some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("현재 프로필")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("현재 프로필")
+                .font(.title2.bold())
+            
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
                         Text(profile.displayTitle)
                             .font(.title3.bold())
-                    }
-                    Spacer()
-                    if profiles.count > 1 {
-                        Button("전환") {
-                            showProfileManagement = true
+                        Spacer()
+                        if profiles.count > 1 {
+                            Button("전환") {
+                                showProfileManagement = true
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
+                    }
+
+                    LabeledContent("회사", value: profile.company)
+                    LabeledContent("산업", value: profile.industry)
+                    LabeledContent("직무", value: profile.role)
+
+                    if profiles.count > 1 {
+                        Text("등록된 프로필 \(profiles.count)개")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    ProfileSessionSummaryCard(
+                        stats: ProfileSessionStats.make(from: profile)
+                    ) {
+                        showSessionHistory = true
                     }
                 }
-
-                LabeledContent("회사", value: profile.company)
-                LabeledContent("산업", value: profile.industry)
-                LabeledContent("직무", value: profile.role)
-
-                if profiles.count > 1 {
-                    Text("등록된 프로필 \(profiles.count)개")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Divider()
-
-                ProfileSessionSummaryCard(
-                    stats: ProfileSessionStats.make(from: profile)
-                ) {
-                    showSessionHistory = true
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
         }
     }
 

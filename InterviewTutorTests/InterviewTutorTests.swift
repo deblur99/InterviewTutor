@@ -691,3 +691,33 @@ struct SessionPhaseTests {
         #expect(!SessionPhase.questionTTS.isAnsweringPhase)
     }
 }
+
+struct PlainTextSanitizerTests {
+
+    @Test func stripsMarkdownEmphasis() {
+        let input = "**핵심 경험**을 _상황_과 `결과`로 설명했습니다."
+        let output = PlainTextSanitizer.strippingMarkdownEmphasis(input)
+        #expect(!output.contains("**"))
+        #expect(!output.contains("`"))
+        #expect(output.contains("핵심 경험"))
+        #expect(output.contains("상황"))
+        #expect(output.contains("결과"))
+    }
+}
+
+
+struct CustomInterviewQuestionTests {
+
+    @Test func appliesOnlyToSelectedStages() {
+        let item = CustomInterviewQuestion(
+            questionText: "사용자 질문",
+            expectedAnswer: "핵심 답변",
+            recommendedSeconds: 80,
+            stages: [.expert, .freePractice]
+        )
+
+        #expect(item.applies(to: .expert))
+        #expect(item.applies(to: .freePractice))
+        #expect(item.applies(to: .beginner) == false)
+    }
+}

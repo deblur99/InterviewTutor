@@ -49,7 +49,7 @@ struct FreePracticeTopicPicker<Footer: View>: View {
             Stepper(
                 "연습 문항 수: \(configuration.questionCount)개",
                 value: $configuration.questionCount,
-                in: 1...10
+                in: 1 ... 10
             )
 
             if configuration.selectedTopics.isEmpty {
@@ -94,7 +94,11 @@ private struct TopicToggleCard: View {
                 }
             }
             .padding(10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .background(
+                isSelected ? Color.accentColor.opacity(0.12)
+                    : Color(nsColor: .windowBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 10)
                     .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)

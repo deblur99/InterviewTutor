@@ -63,11 +63,11 @@ enum PracticeTopic: String, Codable, CaseIterable, Identifiable, Hashable {
 
     /// Stable UI and round-robin order, independent of enum declaration order.
     static let practiceOrder: [PracticeTopic] = [
-        .documentBased,
-        .behavioral,
-        .companyFit,
-        .careerChangeReason,
         .selfIntro,
+        .careerChangeReason,
+        .documentBased,
+        .companyFit,
+        .behavioral,
         .reverseQuestion,
         .closing,
     ]

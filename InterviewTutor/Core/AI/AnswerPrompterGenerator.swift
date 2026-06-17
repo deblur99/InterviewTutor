@@ -8,10 +8,10 @@ struct AnswerPrompterContent: Equatable, Sendable {
 
 @Generable
 struct GeneratedAnswerPrompter {
-    @Guide(description: "면접 답변 참고용 전문. 완결된 문장 3~4개")
+    @Guide(description: "면접 답변 참고용 전문. 완결된 문장 3~4개. 마크다운·강조 기호(** 등) 없이 평문만")
     var scriptSentences: [String]
 
-    @Guide(description: "답변 시 기억할 실용 팁 한 문장")
+    @Guide(description: "답변 시 기억할 실용 팁 한 문장. 마크다운·강조 기호 없이 평문만")
     var tip: String
 }
 
@@ -46,6 +46,7 @@ final class AnswerPrompterGenerator {
             화상면접 연습용 프롬프터를 작성합니다.
             지원자가 질문에 답할 때 참고할 예시 답변 전문(3~4문장)과 실용 팁(1문장)을 제공합니다.
             전문은 자연스럽게 말할 수 있는 구어체 문장으로 작성하고, 지원자의 서류 정보를 반영하세요.
+            마크다운, 볼드(**), 이탤릭, 백틱 등 서식 기호는 절대 사용하지 마세요. 읽을 수 있는 평문만 작성하세요.
             """)
 
             let prompt = """
@@ -58,12 +59,12 @@ final class AnswerPrompterGenerator {
 
             let response = try await session.respond(to: prompt, generating: GeneratedAnswerPrompter.self)
             let sentences = response.content.scriptSentences
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { PlainTextSanitizer.strippingMarkdownEmphasis($0) }
                 .filter { !$0.isEmpty }
 
             guard sentences.count >= 2 else { return nil }
 
-            let tip = response.content.tip.trimmingCharacters(in: .whitespacesAndNewlines)
+            let tip = PlainTextSanitizer.strippingMarkdownEmphasis(response.content.tip)
             guard !tip.isEmpty else { return nil }
 
             return AnswerPrompterContent(
@@ -86,9 +87,10 @@ final class AnswerPrompterGenerator {
 
         let sentences: [String]
         if let expected = question.expectedAnswer, !expected.isEmpty {
-            let parts = expected
+            let cleaned = PlainTextSanitizer.strippingMarkdownEmphasis(expected)
+            let parts = cleaned
                 .split(whereSeparator: { ".!?。".contains($0) })
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .map { PlainTextSanitizer.strippingMarkdownEmphasis(String($0)) }
                 .filter { !$0.isEmpty }
             sentences = parts.isEmpty
                 ? fallbackSentences(keywordPhrase: keywordPhrase, topic: topic, profile: profile, question: question)

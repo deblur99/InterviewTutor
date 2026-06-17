@@ -18,6 +18,8 @@ final class CandidateProfile {
 
     var freePracticeConfigJSON: String?
 
+    var customInterviewQuestionsJSON: String?
+
     var interviewDate: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \InterviewSession.profile)
@@ -38,6 +40,7 @@ final class CandidateProfile {
         updatedAt: Date = .now,
         questionPoolFingerprint: String? = nil,
         interviewDate: Date? = nil,
+        customInterviewQuestionsJSON: String? = nil,
         sessions: [InterviewSession] = [],
         cachedQuestions: [CachedQuestion] = []
     ) {
@@ -52,6 +55,7 @@ final class CandidateProfile {
         self.updatedAt = updatedAt
         self.questionPoolFingerprint = questionPoolFingerprint
         self.interviewDate = interviewDate
+        self.customInterviewQuestionsJSON = customInterviewQuestionsJSON
         self.sessions = sessions
         self.cachedQuestions = cachedQuestions
     }
@@ -123,4 +127,21 @@ final class CandidateProfile {
             freePracticeConfigJSON = String(data: data, encoding: .utf8)
         }
     }
+
+
+    var customInterviewQuestions: [CustomInterviewQuestion] {
+        get {
+            guard let json = customInterviewQuestionsJSON,
+                  let data = json.data(using: .utf8),
+                  let questions = try? JSONDecoder().decode([CustomInterviewQuestion].self, from: data) else {
+                return []
+            }
+            return questions
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            customInterviewQuestionsJSON = String(data: data, encoding: .utf8)
+        }
+    }
+
 }

@@ -11,6 +11,7 @@ struct ProfileManagementView: View {
     @State private var showAddProfile = false
     @State private var profileToEdit: CandidateProfile?
     @State private var profileToDelete: CandidateProfile?
+    @State private var profileForCustomQuestions: CandidateProfile?
     @State private var poolRefillTask: Task<Void, Never>?
 
     var body: some View {
@@ -44,6 +45,10 @@ struct ProfileManagementView: View {
                 OnboardingFlowView(profile: profile, mode: .edit) { savedProfile in
                     activeProfileStore.select(savedProfile)
                 }
+            }
+
+            .sheet(item: $profileForCustomQuestions, onDismiss: refillPoolForActiveProfile) { profile in
+                ProfileCustomQuestionLibraryView(profile: profile)
             }
             .alert("프로필 삭제", isPresented: Binding(
                 get: { profileToDelete != nil },
@@ -99,6 +104,9 @@ struct ProfileManagementView: View {
                         }
                         Button("수정") {
                             profileToEdit = profile
+                        }
+                        Button("사용자 질문 관리") {
+                            profileForCustomQuestions = profile
                         }
                         Divider()
                         Button("삭제", role: .destructive) {

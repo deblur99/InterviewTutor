@@ -28,7 +28,11 @@ final class FreePracticeQuestionBuilder {
             }
         }
 
-        return results
+        let custom = profile.customInterviewQuestions
+            .filter { $0.applies(to: .freePractice) && $0.isValid }
+            .map { $0.toGeneratedQuestion() }
+
+        return results + custom
     }
 
     private func generatePool(

@@ -136,7 +136,8 @@ final class QuestionPoolManager {
 
         let documentQuestions = selected.map { $0.toGeneratedQuestion() }
         let fullSet = questionGenerator.buildBeginnerQuestionSet(documentQuestions: documentQuestions)
-        return SessionQuestionSet(questions: fullSet, reservedDocumentQuestionIDs: selected.map(\.questionID))
+        let mergedSet = mergedWithCustomQuestions(fullSet, profile: profile, stage: .beginner)
+        return SessionQuestionSet(questions: mergedSet, reservedDocumentQuestionIDs: selected.map(\.questionID))
     }
 
     // MARK: - Skilled
@@ -188,7 +189,8 @@ final class QuestionPoolManager {
             companyQuestions: company.map { $0.toGeneratedQuestion() }
         )
 
-        return SessionQuestionSet(questions: fullSet, reservedDocumentQuestionIDs: reservedIDs)
+        let mergedSet = mergedWithCustomQuestions(fullSet, profile: profile, stage: .skilled)
+        return SessionQuestionSet(questions: mergedSet, reservedDocumentQuestionIDs: reservedIDs)
     }
 
     // MARK: - Expert
@@ -278,7 +280,8 @@ final class QuestionPoolManager {
             configuration: configuration
         )
 
-        return SessionQuestionSet(questions: fullSet, reservedDocumentQuestionIDs: reservedIDs)
+        let mergedSet = mergedWithCustomQuestions(fullSet, profile: profile, stage: .expert)
+        return SessionQuestionSet(questions: mergedSet, reservedDocumentQuestionIDs: reservedIDs)
     }
 
     private func selectOrGenerate(
@@ -343,6 +346,36 @@ final class QuestionPoolManager {
         case .freePractice:
             return []
         }
+    }
+
+
+    private func mergedWithCustomQuestions(
+        _ baseQuestions: [GeneratedQuestion],
+        profile: CandidateProfile,
+        stage: SessionStage
+    ) -> [GeneratedQuestion] {
+        let custom = profile.customInterviewQuestions
+            .filter { $0.applies(to: stage) && $0.isValid }
+            .map { $0.toGeneratedQuestion() }
+
+        guard !custom.isEmpty else { return baseQuestions }
+
+        let introIndex = baseQuestions.firstIndex { $0.category == .selfIntro }
+        let closingIndex = baseQuestions.firstIndex { $0.category == .closing }
+
+        if let introIndex {
+            var merged = baseQuestions
+            let insertIndex: Int
+            if let closingIndex, closingIndex > introIndex + 1 {
+                insertIndex = min(introIndex + 1, closingIndex)
+            } else {
+                insertIndex = introIndex + 1
+            }
+            merged.insert(contentsOf: custom, at: insertIndex)
+            return merged
+        }
+
+        return custom + baseQuestions
     }
 
     private func reserve(_ questions: [CachedQuestion], context: ModelContext) {

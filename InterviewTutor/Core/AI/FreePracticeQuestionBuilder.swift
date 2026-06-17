@@ -13,12 +13,14 @@ final class FreePracticeQuestionBuilder {
         var poolByTopic: [PracticeTopic: [GeneratedQuestion]] = [:]
 
         for topic in Set(sequence) {
+            guard !Task.isCancelled else { return results }
             let needed = sequence.filter { $0 == topic }.count
             poolByTopic[topic] = await generatePool(for: topic, profile: profile, count: needed)
         }
 
         var usageIndex: [PracticeTopic: Int] = [:]
         for topic in sequence {
+            guard !Task.isCancelled else { return results }
             let index = usageIndex[topic, default: 0]
             if let pool = poolByTopic[topic], index < pool.count {
                 results.append(pool[index])

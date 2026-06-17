@@ -41,6 +41,8 @@ final class SessionViewModel {
     private var sessionStarted = false
     private var modelContext: ModelContext?
     private var configurationUpdateTask: Task<Void, Never>?
+    private var questionPreparationTask: Task<Void, Never>?
+    private var preparationGeneration = 0
     private var lastPreparedExpertConfiguration: ExpertSessionConfiguration?
 
     init(profile: CandidateProfile, stage: SessionStage, expertConfiguration: ExpertSessionConfiguration? = nil) {
@@ -105,6 +107,7 @@ final class SessionViewModel {
     }
 
     func scheduleExpertConfigurationUpdate(_ configuration: ExpertSessionConfiguration, context: ModelContext) {
+        questionPreparationTask?.cancel()
         configurationUpdateTask?.cancel()
         configurationUpdateTask = Task {
             try? await Task.sleep(for: .milliseconds(350))
@@ -126,11 +129,14 @@ final class SessionViewModel {
     func cancelPendingConfigurationUpdates() {
         configurationUpdateTask?.cancel()
         configurationUpdateTask = nil
+        questionPreparationTask?.cancel()
+        questionPreparationTask = nil
     }
 
     private func applyExpertConfiguration(_ configuration: ExpertSessionConfiguration, context: ModelContext) async {
         guard stage == .expert else { return }
 
+        questionPreparationTask?.cancel()
         expertConfiguration = configuration
 
         if configuration == lastPreparedExpertConfiguration, !questionFlow.questions.isEmpty {
@@ -138,9 +144,13 @@ final class SessionViewModel {
         }
 
         releaseReservedQuestions(context: context)
-        await prepareQuestions(context: context)
 
-        if !questionFlow.questions.isEmpty {
+        questionPreparationTask = Task {
+            await prepareQuestions(context: context)
+        }
+        await questionPreparationTask?.value
+
+        if !Task.isCancelled, !questionFlow.questions.isEmpty {
             lastPreparedExpertConfiguration = configuration
         }
     }
@@ -173,13 +183,20 @@ final class SessionViewModel {
 
     func prepareQuestions(context: ModelContext) async {
         modelContext = context
+
+        preparationGeneration += 1
+        let generation = preparationGeneration
         isLoadingQuestions = true
         isLoadingFromPool = questionPoolManager.unusedCount(for: profile, stage: stage)
             >= poolThresholdForLoadingIndicator
         defer {
-            isLoadingQuestions = false
-            isLoadingFromPool = false
+            if generation == preparationGeneration {
+                isLoadingQuestions = false
+                isLoadingFromPool = false
+            }
         }
+
+        guard !Task.isCancelled else { return }
 
         let sessionSet = await questionPoolManager.prepareSessionQuestions(
             profile: profile,
@@ -187,6 +204,9 @@ final class SessionViewModel {
             expertConfiguration: expertConfiguration,
             context: context
         )
+
+        guard !Task.isCancelled, generation == preparationGeneration else { return }
+
         questionFlow.setQuestions(sessionSet.questions)
         reservedPoolQuestionIDs = sessionSet.reservedDocumentQuestionIDs
         questionIDMap = Dictionary(

@@ -4,7 +4,15 @@ import Foundation
 @MainActor
 final class InterviewerVoice {
     private let synthesizer = AVSpeechSynthesizer()
+    private let speechDelegate: SpeechDelegate
     private var continuation: CheckedContinuation<Void, Never>?
+
+    init() {
+        let delegate = SpeechDelegate()
+        speechDelegate = delegate
+        delegate.owner = self
+        synthesizer.delegate = delegate
+    }
 
     func speak(_ text: String, tone: InterviewerTone = .neutral, language: String = "ko-KR") async {
         await withCheckedContinuation { continuation in
@@ -15,7 +23,6 @@ final class InterviewerVoice {
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate * tone.speechRateMultiplier
             utterance.pitchMultiplier = tone.pitchMultiplier
 
-            synthesizer.delegate = SpeechDelegate(owner: self)
             synthesizer.speak(utterance)
         }
     }
@@ -34,10 +41,6 @@ final class InterviewerVoice {
 @MainActor
 private final class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
     weak var owner: InterviewerVoice?
-
-    init(owner: InterviewerVoice) {
-        self.owner = owner
-    }
 
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer,

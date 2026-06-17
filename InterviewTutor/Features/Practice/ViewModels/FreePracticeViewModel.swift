@@ -46,6 +46,8 @@ final class FreePracticeViewModel {
     private var feedbackContinuation: CheckedContinuation<Void, Never>?
     private var modelContext: ModelContext?
     private var configurationUpdateTask: Task<Void, Never>?
+    private var preparationTask: Task<Void, Never>?
+    private var preparationGeneration = 0
     private var lastPreparedConfiguration: FreePracticeConfiguration?
 
     init(profile: CandidateProfile, configuration: FreePracticeConfiguration? = nil) {
@@ -68,6 +70,7 @@ final class FreePracticeViewModel {
     }
 
     func scheduleConfigurationUpdate(_ configuration: FreePracticeConfiguration, context: ModelContext) {
+        preparationTask?.cancel()
         configurationUpdateTask?.cancel()
         configurationUpdateTask = Task {
             try? await Task.sleep(for: .milliseconds(350))
@@ -88,9 +91,52 @@ final class FreePracticeViewModel {
     func cancelPendingUpdates() {
         configurationUpdateTask?.cancel()
         configurationUpdateTask = nil
+        preparationTask?.cancel()
+        preparationTask = nil
+    }
+
+    func moveQuestions(from source: IndexSet, to destination: Int) {
+        var updated = questions
+        let movingItems = source.sorted().map { updated[$0] }
+        for index in source.sorted(by: >) {
+            updated.remove(at: index)
+        }
+
+        var targetIndex = destination
+        for index in source where index < destination {
+            targetIndex -= 1
+        }
+
+        updated.insert(contentsOf: movingItems, at: min(max(targetIndex, 0), updated.count))
+        questions = updated
+        rebuildQuestionIDMap()
+    }
+
+    func addCustomQuestion(topic: String, question: String, expectedAnswer: String) {
+        let trimmedTopic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedExpected = expectedAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuestion.isEmpty else { return }
+
+        let custom = GeneratedQuestion(
+            questionText: trimmedQuestion,
+            promptKeywords: trimmedExpected.isEmpty ? trimmedTopic : trimmedExpected,
+            recommendedSeconds: 120,
+            category: .comprehensive,
+            topicLabel: trimmedTopic.isEmpty ? "추가 질문" : trimmedTopic,
+            expectedAnswer: trimmedExpected.isEmpty ? nil : trimmedExpected
+        )
+        questions.append(custom)
+        rebuildQuestionIDMap()
+        errorMessage = nil
+    }
+
+    private func rebuildQuestionIDMap() {
+        questionIDMap = Dictionary(uniqueKeysWithValues: questions.enumerated().map { ($0.offset, $0.element.id) })
     }
 
     private func applyConfigurationUpdate(_ configuration: FreePracticeConfiguration, context: ModelContext) async {
+        preparationTask?.cancel()
         self.configuration = configuration
         modelContext = context
 
@@ -98,6 +144,7 @@ final class FreePracticeViewModel {
             questions = []
             lastPreparedConfiguration = nil
             errorMessage = "연습 항목을 하나 이상 선택해 주세요."
+            isLoadingQuestions = false
             return
         }
 
@@ -106,10 +153,10 @@ final class FreePracticeViewModel {
             return
         }
 
-        await prepareQuestions()
-        if !questions.isEmpty {
-            lastPreparedConfiguration = configuration
+        preparationTask = Task {
+            await prepareQuestions()
         }
+        await preparationTask?.value
     }
 
     func updateConfiguration(_ configuration: FreePracticeConfiguration, context: ModelContext) async {
@@ -122,13 +169,28 @@ final class FreePracticeViewModel {
             return
         }
 
+        preparationGeneration += 1
+        let generation = preparationGeneration
         isLoadingQuestions = true
-        defer { isLoadingQuestions = false }
+        defer {
+            if generation == preparationGeneration {
+                isLoadingQuestions = false
+            }
+        }
+
+        guard !Task.isCancelled else { return }
 
         let built = await questionBuilder.buildQuestions(profile: profile, configuration: configuration)
+
+        guard !Task.isCancelled, generation == preparationGeneration else { return }
+
         questions = built
         currentIndex = 0
-        questionIDMap = Dictionary(uniqueKeysWithValues: built.enumerated().map { ($0.offset, $0.element.id) })
+        rebuildQuestionIDMap()
+        if !questions.isEmpty {
+            lastPreparedConfiguration = configuration
+            errorMessage = nil
+        }
     }
 
     func setupCamera() async {

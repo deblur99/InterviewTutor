@@ -9,6 +9,7 @@ struct PreFreePracticeView: View {
     @State private var configuration: FreePracticeConfiguration
     @State private var viewModel: FreePracticeViewModel
     @State private var navigateToSession = false
+    @State private var showCustomQuestionSheet = false
 
     init(profile: CandidateProfile) {
         self.profile = profile
@@ -31,13 +32,12 @@ struct PreFreePracticeView: View {
                 Text("연습하고 싶은 항목만 골라 집중 훈련합니다. 문항마다 피드백을 받고, 마지막에 종합 피드백이 제공됩니다.")
                     .foregroundStyle(.secondary)
 
-                FreePracticeTopicPicker(configuration: $configuration)
+                HStack(alignment: .top, spacing: 24) {
+                    FreePracticeTopicPicker(configuration: $configuration)
+                        .frame(maxWidth: 380)
 
-                if viewModel.isLoadingQuestions {
-                    ProgressView("질문 준비 중...")
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                } else if !viewModel.questions.isEmpty {
-                    questionPreview
+                    practiceQuestionsPanel
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 CenteredPrimaryActionButton(
@@ -67,6 +67,15 @@ struct PreFreePracticeView: View {
         .navigationDestination(isPresented: $navigateToSession) {
             FreePracticeSessionView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showCustomQuestionSheet) {
+            FreePracticeCustomQuestionSheet { topic, question, expectedAnswer in
+                viewModel.addCustomQuestion(
+                    topic: topic,
+                    question: question,
+                    expectedAnswer: expectedAnswer
+                )
+            }
+        }
         .alert("오류", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.clearError() } }
@@ -77,33 +86,76 @@ struct PreFreePracticeView: View {
         }
     }
 
-    private var questionPreview: some View {
+    @ViewBuilder
+    private var practiceQuestionsPanel: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("오늘의 연습")
                     .font(.headline)
-                Text(configuration.summaryLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
 
-                ForEach(Array(viewModel.questions.enumerated()), id: \.element.id) { index, question in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1).")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, alignment: .trailing)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(question.category.displayName)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text(question.questionText)
-                                .font(.subheadline)
+                if viewModel.isLoadingQuestions {
+                    ProgressView("질문 준비 중...")
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else if viewModel.questions.isEmpty {
+                    Text(configuration.isValid
+                         ? "질문을 생성하지 못했습니다."
+                         : "항목을 선택하면 질문이 생성됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                } else {
+                    Text(configuration.summaryLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text("드래그하여 순서 변경")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+
+                    List {
+                        ForEach(Array(viewModel.questions.enumerated()), id: \.element.id) { index, question in
+                            questionRow(index: index, question: question)
+                        }
+                        .onMove { source, destination in
+                            viewModel.moveQuestions(from: source, to: destination)
                         }
                     }
+                    .listStyle(.plain)
+                    .frame(minHeight: CGFloat(viewModel.questions.count) * 56 + 8)
+
+                    Button {
+                        showCustomQuestionSheet = true
+                    } label: {
+                        Label("그 외 추가 질문", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
+    }
+
+    private func questionRow(index: Int, question: GeneratedQuestion) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+
+            Text("\(index + 1).")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+                .frame(width: 20, alignment: .trailing)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(question.displayTopicName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(question.questionText)
+                    .font(.subheadline)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }

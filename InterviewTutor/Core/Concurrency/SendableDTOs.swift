@@ -32,18 +32,28 @@ struct GeneratedQuestion: Sendable, Identifiable {
     let promptKeywords: String
     let recommendedSeconds: Int
     var category: QuestionCategory
+    var topicLabel: String?
+    var expectedAnswer: String?
+
+    var displayTopicName: String {
+        topicLabel ?? category.displayName
+    }
 
     init(
         id: UUID = UUID(),
         questionText: String,
         promptKeywords: String,
         recommendedSeconds: Int,
-        category: QuestionCategory = .documentBased
+        category: QuestionCategory = .documentBased,
+        topicLabel: String? = nil,
+        expectedAnswer: String? = nil
     ) {
         self.id = id
         self.questionText = questionText
         self.promptKeywords = promptKeywords
         self.recommendedSeconds = recommendedSeconds
         self.category = category
+        self.topicLabel = topicLabel
+        self.expectedAnswer = expectedAnswer
     }
 }

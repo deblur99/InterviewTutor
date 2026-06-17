@@ -398,6 +398,38 @@ struct FreePracticeConfigurationTests {
     }
 }
 
+@MainActor
+struct FreePracticeViewModelTests {
+
+    @Test func reordersQuestions() {
+        let profile = CandidateProfile(company: "Test Co", role: "Engineer")
+        let viewModel = FreePracticeViewModel(profile: profile)
+        viewModel.addCustomQuestion(topic: "1", question: "Q1", expectedAnswer: "")
+        viewModel.addCustomQuestion(topic: "2", question: "Q2", expectedAnswer: "")
+        viewModel.addCustomQuestion(topic: "3", question: "Q3", expectedAnswer: "")
+
+        viewModel.moveQuestions(from: IndexSet(integer: 2), to: 0)
+
+        #expect(viewModel.questions.map(\.questionText) == ["Q3", "Q1", "Q2"])
+    }
+
+    @Test func appendsCustomQuestion() {
+        let profile = CandidateProfile(company: "Test Co", role: "Engineer")
+        let viewModel = FreePracticeViewModel(profile: profile)
+
+        viewModel.addCustomQuestion(
+            topic: "협업",
+            question: "팀 갈등을 어떻게 해결했나요?",
+            expectedAnswer: "상황, 조치, 결과"
+        )
+
+        #expect(viewModel.questions.count == 1)
+        #expect(viewModel.questions.last?.questionText == "팀 갈등을 어떻게 해결했나요?")
+        #expect(viewModel.questions.last?.topicLabel == "협업")
+        #expect(viewModel.questions.last?.expectedAnswer == "상황, 조치, 결과")
+    }
+}
+
 struct InterviewCountdownTests {
 
     @Test func formatsUpcomingCountdown() {
